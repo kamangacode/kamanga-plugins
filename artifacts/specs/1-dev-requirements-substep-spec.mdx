@@ -1,0 +1,231 @@
+---
+title: "Sous-step `requirements` dans `/dev` + skill `/req` standalone"
+description: Spec d'implémentation du step requirements (attach/create/skip) entre analyze et spec dans la pipeline /dev de dev-core, avec skill /req invocable indépendamment.
+issue: 1
+---
+
+## Context
+
+**Promoted from:** [Sous-step Requirements automatique dans le cycle /dev (override kamanga-plugins)](../analyses/1-dev-requirements-substep-analysis.mdx)
+
+La pipeline `/dev` de dev-core (`triage → frame → analyze → spec → plan → implement → ...`) ne contient pas d'étape "Requirements". Or `crmcoaching` a livré (PR #648, ADR-048+049) un référentiel `docs/requirements/` avec une convention claire : chaque issue doit identifier ou créer un REQ, mettre à jour son `status` au fil du cycle, et attacher la spec via `related.specs`. L'étape est aujourd'hui documentée mais non exécutée par l'orchestrateur — la discipline tient sur la mémoire humaine.
+
+Cette spec implémente le **Shape 1** retenu en analyse : créer un skill autonome `kamanga-plugins/plugins/dev-core/skills/req/SKILL.md` (invocable indépendamment via `/req #N`) et overrider `kamanga-plugins/plugins/dev-core/skills/dev/SKILL.md` pour insérer une étape `requirements` entre `analyze` et `spec`. Activation conditionnée par `stack.yml.requirements.enabled: true`.
+
+Dépendances : `gh issue view`, lecture/écriture frontmatter Zod des REQ, template `_template.mdx` dans `docs/requirements/`. Débloque : matrice de traçabilité issue↔REQ↔spec sans intervention humaine.
+
+## Goal
+
+Quand un agent (ou dev humain) lance `/dev #N` sur une issue Tier F-lite ou F-full, la pipeline exécute automatiquement un step `requirements` après `analyze` et avant `spec`. Le step :
+1. Détecte les REQ existants pertinents (label `area:*` → scope domaine ; LLM compare titre+body de l'issue avec frontmatters des REQ).
+2. Présente à l'utilisateur via `AskUserQuestion` : **attach** (mise à jour `related.issues`), **create stub** (template pré-rempli), **skip with reason** (loggé, non bloquant v1).
+3. Mute directement les fichiers dans `docs/requirements/{functional,non-functional}/{domain}/REQ-*.mdx` — pas d'artifact `Σ.requirements` séparé.
+4. `/spec` consomme l'état en greppant les REQ ayant `related.issues: [N]` pour pré-remplir son frontmatter (`req: REQ-BOOKING-005`).
+
+Le développeur ne « se souvient » plus de l'étape : elle vit dans la pipeline et dans le référentiel REQ lui-même.
+
+## Users & Use Cases
+
+**Utilisateur primaire** : développeur (humain ou agent) qui lance `/dev #N` sur une issue feature.
+
+| Rôle | Workflow | Scénario type |
+|------|----------|--------------|
+| Dev humain via Claude Code | `/dev #42` (Tier F-lite) | Après le frame et l'analyze, le step propose 2 REQ candidats. Dev sélectionne `REQ-BOOKING-005` → `related.issues: [42]` ajouté. La spec hérite. |
+| Agent autonome (ex. dev pipeline) | `/dev #42` non interactif | Le step doit pouvoir prendre une décision : si un seul match avec confiance ≥ 0.8, attach automatique ; sinon create-stub par défaut. Mode `--auto` à définir (¬v1, voir Open Questions). |
+| Re-attachment manuel | `/req #42` (standalone) | L'issue a déjà été triée mais le REQ initial n'était pas pertinent. Dev relance `/req #42` pour re-choisir. Le step détecte les attachments existants et propose detach/replace. |
+| Tier S (chore) | `/dev #99` | Le step skip silencieusement (pas de REQ pour les chores). Pas de question posée. |
+| Projet sans REQ | `/dev #42` dans un repo sans `stack.yml.requirements.enabled` | Skip silencieux, log debug uniquement. |
+
+**Out-of-scope users (v1)** : utilisateurs voulant éditer les ACs directement depuis le step (renvoi vers `/spec`).
+
+## Expected Behavior
+
+### Happy path
+
+```
+1. /dev #42 (F-lite, label area:booking)
+2. → frame artifact écrit
+3. → analyze artifact écrit (F-lite skip si τ ≠ F-full, déjà géré dev-core)
+4. → STEP requirements (nouveau)
+   a. Lit stack.yml. requirements.enabled == true → continue
+   b. Lit l'issue via gh issue view 42 (title, body, labels)
+   c. Détecte label area:booking → scope sur docs/requirements/functional/booking/
+   d. Lit les frontmatters des N REQ du dossier (typiquement 5-15)
+   e. Appel LLM (claude-haiku-4-5) : compare titre+body avec frontmatters → 0-N matches avec score
+   f. AskUserQuestion :
+      - "REQ-BOOKING-005: Annulation de réservation" (score 0.92)
+      - "REQ-BOOKING-012: Email confirmation" (score 0.41)
+      - [Create new REQ stub]
+      - [Skip with reason]
+   g. User sélectionne REQ-BOOKING-005
+   h. Mute docs/requirements/functional/booking/REQ-BOOKING-005.mdx :
+      related.issues: [42]  (ajout de 42 si absent)
+   i. Pas de modif de status (v1)
+5. → spec artifact écrit, frontmatter pré-rempli :
+   req: REQ-BOOKING-005
+   (lu via grep "related.issues:.*42" dans docs/requirements/)
+6. → plan, implement, ...
+```
+
+### Edge cases
+
+| Cas | Comportement |
+|-----|--------------|
+| `stack.yml` absent ∨ `requirements.enabled` ≠ true | Skip silencieux, log `debug: requirements step skipped (not enabled)`. |
+| Tier S (chore) | Skip silencieux. |
+| Tier F-lite : `analyze` skipped | Step requirements s'exécute quand même après le slot `analyze` (qui était no-op). |
+| Label `area:*` absent | Fallback : scan global `docs/requirements/functional/**/*.mdx` (plus cher en LLM tokens, mais permet récupération). Warn l'utilisateur. |
+| Plusieurs labels `area:*` | Scope sur l'union des dossiers correspondants. |
+| Aucun match LLM (tous score &lt; 0.3) | AskUserQuestion ne propose que `[Create new REQ stub]` ou `[Skip with reason]`. |
+| Plusieurs matches haute confiance (≥ 2 avec score ≥ 0.8) | Présenter tous les matches, multiSelect=true (attach à plusieurs REQ autorisé). |
+| REQ frontmatter invalide (Zod fail) | Skip ce REQ dans la détection, log warning. Ne fait pas crasher le step. |
+| User cancel via Esc | Step retourne échec, pipeline `/dev` s'arrête avec message clair (pas de mutation partielle). |
+| Re-run `/dev #42` ou `/dev --from spec` | Le step détecte les REQ déjà ayant `42` ∈ `related.issues` ; propose `[Keep existing attachment]` en option par défaut. Pas de re-question si pas de changement. |
+| `/req #42` standalone après attach existant | Le step détecte l'attachment, propose `[Keep] / [Detach + re-attach] / [Detach + skip]`. |
+| Création stub : ID conflict | Lecture des REQ existants du domaine pour calculer `next` numéro. Atomique (pas de double-création concurrente attendue v1). |
+| Tier F-full : analyze produit shapes contradictoires avec REQ existant | Pas géré v1. Le step propose attach quand même ; reviewer humain doit signaler la divergence. |
+| Skip with reason | Loggé dans le frame artifact (section `## Requirements skipped: <reason>`). Visible dans `pnpm requirements:matrix` comme issue sans REQ. Non bloquant v1. |
+
+## Breadboard
+
+### UI Affordances
+
+| ID | Element | Location | Trigger |
+|----|---------|----------|---------|
+| U1 | Prompt `AskUserQuestion` "Quel REQ attacher à l'issue #N ?" | Skill `req` (interactif) | Step `requirements` invoqué par `/dev` ou `/req` |
+| U2 | Prompt `AskUserQuestion` "Skip reason :" (texte libre) | Skill `req` | User choisit `[Skip with reason]` à U1 |
+| U3 | Confirmation "Created REQ-BOOKING-007 — édite les ACs maintenant ?" | Skill `req` | User choisit `[Create new REQ stub]` à U1 |
+| U4 | Message "Requirements step skipped (stack.yml not configured)" | Stdout `/dev` | `stack.yml.requirements.enabled` ≠ true |
+
+### Code Affordances
+
+| ID | Handler | Wiring | Logic |
+|----|---------|--------|-------|
+| N1 | `read_stack_config()` | `dev` orchestrator → N1 → S1 | Lit `stack.yml`, retourne `{ enabled: bool, root: path, validateCmd: string }`. |
+| N2 | `gh_issue_view(N)` | `req` skill → N2 → S2 | Wrapper `gh issue view N --json title,body,labels`. |
+| N3 | `scope_domain_dirs(labels, root)` | `req` skill → N3 | `area:X` → `{root}/functional/X/`. Plusieurs labels → liste. Vide → fallback global. |
+| N4 | `read_req_frontmatters(dirs)` | `req` skill → N4 → S3 | Glob, parse YAML frontmatter chaque REQ, valide Zod. Skip + warn les invalides. |
+| N5 | `llm_match(issue, candidates)` | `req` skill → N5 → S4 | Appel `claude-haiku-4-5` avec prompt de matching (template + few-shot). Retourne `[{ id, score, reason }]`. |
+| N6 | `ask_user_action(matches)` | N5 → N6 → U1 | Construit options `AskUserQuestion` depuis matches + actions standard (create/skip). |
+| N7 | `attach_req(reqId, issueN)` | U1 → N7 → S3 | Lit REQ-X.mdx, mute `related.issues` (ajout idempotent), réécrit. |
+| N8 | `create_req_stub(domain, frame, issueN)` | U1 → N8 → S3 | `cp _template.mdx → REQ-X-{next}.mdx`, pré-remplit `id, title, domain, sources, related.issues=[N]`, ACs en `[NEEDS CLARIFICATION]`. |
+| N9 | `log_skip(issueN, reason, framePath)` | U2 → N9 → S5 | Append section `## Requirements skipped: <reason>` au frame artifact. |
+| N10 | `query_attached_reqs(N, root)` | `spec` skill → N10 → S3 | `grep -l "related.issues:.*\b{N}\b" {root}/**/*.mdx` → liste IDs. Consommé par `/spec` pour pré-remplir frontmatter. |
+
+### Data Stores
+
+| ID | Store | Type | Accessed by |
+|----|-------|------|-------------|
+| S1 | `.claude/stack.yml` | Persistant (repo) | N1 |
+| S2 | GitHub issue (API) | Externe | N2 |
+| S3 | `docs/requirements/{functional,non-functional}/{domain}/REQ-*.mdx` | Persistant (repo) — **source of truth** | N4, N7, N8, N10 |
+| S4 | LLM API (Claude Haiku) | Externe | N5 |
+| S5 | `artifacts/frames/{N}-{slug}-frame.mdx` | Persistant (repo) | N9 |
+
+**Unknowns** : prompt de matching N5 (template + few-shot) — à finaliser pendant `/analyze` ou via spike d'investigation. Critère de score (cutoff `< 0.3` = no match, `≥ 0.8` = high confidence) à valider sur fixtures réelles.
+
+## Slices
+
+| Slice | Description | Affordances | Demo |
+|-------|-------------|-------------|------|
+| V1 | Skill `/req #N` standalone, label-only détection (pas LLM), 3 actions interactives | N1, N2, N3, N4, N6, N7, N8, N9, U1, U2, U3 | `/req #42` sur une issue avec `area:booking` → liste les 5 REQ booking par titre, user sélectionne, mute le REQ. |
+| V2 | Ajout détection LLM (N5) + scoring + cutoffs | + N5 + S4 | `/req #42` propose les 2 REQ les plus pertinents par score, pas tous. |
+| V3 | Override `dev` SKILL.md : insertion step `requirements` entre `analyze` et `spec` | tout V2 + édition `dev/SKILL.md` | `/dev #42` exécute automatiquement le step. |
+| V4 | Consommation par `/spec` (N10) — frontmatter `req:` pré-rempli | + N10 + override `spec/SKILL.md` | `/dev #42` produit une spec avec `req: REQ-BOOKING-005` sans intervention. |
+
+V1 est démo-able seul (utile en standalone même sans /dev). V3 + V4 = intégration pipeline complète.
+
+## Constraints
+
+- **Plugin local fork** : modifications dans `kamanga-plugins/plugins/dev-core/`, pas dans `roxabi-marketplace` upstream. Sync via `./sync-plugins.sh --local` après chaque édition source (cache hash-keyed n'auto-update pas).
+- **Compatibilité upstream** : si dev-core upstream change la pipeline `/dev`, l'override doit suivre. Documenter le delta dans le README du plugin local.
+- **Pas de dépendance Node/TS** : skill = SKILL.md markdown + invocations CLI (`gh`, `cat`, `sed`, ou Edit/Write tools). Pas de script TS séparé à maintenir.
+- **Activation conditionnelle** : `stack.yml.requirements.enabled` ≠ true → skip silencieux. Ne casse aucun projet existant sans référentiel REQ.
+- **Convention REQ figée** : suit la convention crmcoaching (frontmatter Zod ADR-048+049, ID `REQ-{DOMAIN}-{NNN}`, `_template.mdx`). Si convention évolue, REQ frontmatter parser doit suivre.
+- **Appetite** : 1-2 jours pour V1+V2+V3 ; V4 (intégration `/spec`) peut suivre dans une PR séparée.
+- **Modèle LLM v1** : `claude-haiku-4-5` (rapide, peu coûteux, suffisant pour matching titre+body). Configurable via `stack.yml.requirements.matchModel`.
+
+## Non-goals
+
+- **Auto-AC depuis frame** : pas de génération automatique des `acceptance_criteria` du REQ depuis le frame (LLM trop libre, risque hallucination). User édite manuellement après create-stub.
+- **Auto-status transitions** : pas de mise à jour automatique de `status` (`draft → proposed → in-progress → done`) au fil du cycle. v2.
+- **Génération matrice traceability dans le step** : reste dans `pnpm requirements:matrix` séparé.
+- **NFR auto-détection** : pas de scan automatique des NFR par défaut. Action manuelle "Lier à un NFR" à ajouter en option secondaire si demande émerge — pas v1.
+- **Mode non-interactif `--auto`** : pas v1. Step requiert `AskUserQuestion`. Mode auto déféré tant qu'on n'a pas validé que les heuristiques ne créent pas de faux positifs en pratique.
+- **Skip-with-reason bloquant** : v1 = juste loggé. Visible dans `requirements:matrix` mais aucun gate dans `/pr` ou `/code-review`.
+- **Multi-projet** : v1 cible kamanga-plugins → crmcoaching. Adoption par d'autres projets dev-core = follow-up (le mécanisme `stack.yml` le rend possible).
+- **Detach REQ** : pas v1 (rare en pratique sur issue cycle court). À ajouter si pattern d'erreur émerge.
+
+## Technical Decisions
+
+### TD-1 : Persistance dans les REQ files (pas d'artifact Σ dédié)
+
+La source de vérité est `docs/requirements/{functional,non-functional}/{domain}/REQ-*.mdx`. Le step mute directement `related.issues`. Aucun fichier `Σ.requirements.json` ou section `## Requirements` dans le frame artifact (sauf pour skip — voir TD-3). `/spec` re-dérive l'état par grep.
+
+**Rationale** : élimine la divergence possible entre Σ et REQ. Le matrix tool (`pnpm requirements:matrix`) lit les REQ → cohérent. Convergence par construction.
+
+**Trade-off** : `/spec` doit grep le repo (O(N) REQ files). Acceptable pour < 1000 REQ ; au-delà on ajoutera un index.
+
+### TD-2 : Insertion entre `analyze` et `spec`
+
+Le step a besoin de l'analyse (problématique clarifiée, shapes envisagées) pour faire un meilleur matching qu'à partir du seul frame. Pour Tier F-lite (analyze skipped), le step s'exécute quand même dans le slot post-analyze (l'absence d'analyze ne le bloque pas).
+
+**Skip rules ajoutées** :
+- `requirements ∧ τ == S → skip`
+- `requirements ∧ ¬stack.yml.requirements.enabled → skip silently`
+
+### TD-3 : Skip loggé dans le frame artifact
+
+Le skip-with-reason ne mute aucun REQ (par définition). Pour rester traçable, log dans le frame artifact (section ajoutée en bas) plutôt qu'un fichier dédié. `requirements:matrix` peut grepper les frames pour les détecter.
+
+**Format** :
+```markdown
+## Requirements skipped
+
+**Reason:** &lt;texte fourni par user&gt;
+**Skipped at:** 2026-05-10T14:32:00Z (interview /req #42)
+```
+
+### TD-4 : Override `dev` SKILL.md = patch minimal
+
+Modifier uniquement la table de pipeline + skip rules dans `kamanga-plugins/plugins/dev-core/skills/dev/SKILL.md`. Garder le diff petit pour faciliter merge si upstream évolue. Le reste de la logique vit dans `req/SKILL.md` (modulaire).
+
+### TD-5 : Détection hybride avec fallback
+
+Label-first (`area:X` → scope domaine) car gratuit et précis. LLM en second pour ranker dans le scope. Fallback global (sans label) coûteux mais permet récupération sur issues mal triées.
+
+**Cutoffs initiaux** (à valider sur fixtures) :
+- `score ≥ 0.8` : haute confiance, présenté en premier
+- `0.3 ≤ score &lt; 0.8` : présenté mais étiqueté "low confidence"
+- `score &lt; 0.3` : non présenté (sauf si rien d'autre)
+
+### TD-6 : Test fixtures
+
+- 3 issues fixtures (avec / sans label / multi-label)
+- 5 REQ fixtures (1 match évident, 1 partiel, 3 non-match)
+- Snapshot tests sur le menu `AskUserQuestion` généré (option strings, ordering)
+- Test E2E : `/req #42` sur fixture → REQ frontmatter muté correctement
+
+## Success Criteria
+
+- [ ] `/req #42` (standalone) sur issue avec `area:booking` lit les REQ du dossier `docs/requirements/functional/booking/` et propose `AskUserQuestion` avec ≥ 1 option `[REQ-BOOKING-XXX]` + `[Create new]` + `[Skip]`.
+- [ ] Sélection `[Attach to REQ-BOOKING-005]` ajoute `42` dans `related.issues` du REQ ciblé (idempotent : pas de doublon si déjà présent).
+- [ ] Sélection `[Create new REQ stub]` crée un fichier `REQ-BOOKING-{next}.mdx` avec frontmatter pré-rempli (`id, title, domain, sources, related.issues=[42]`) et ACs `[NEEDS CLARIFICATION]`.
+- [ ] Sélection `[Skip with reason]` ajoute la section `## Requirements skipped` au frame artifact, ne mute aucun REQ.
+- [ ] `/dev #42` (F-lite) exécute automatiquement le step entre analyze et spec, et produit une spec avec frontmatter `req: REQ-BOOKING-005` quand attach a eu lieu.
+- [ ] `/dev #99` (Tier S) skip le step silencieusement (aucun prompt, aucun side-effect).
+- [ ] `/dev #42` dans un repo sans `stack.yml.requirements.enabled` skip silencieusement.
+- [ ] LLM matching utilise `claude-haiku-4-5` par défaut, configurable via `stack.yml.requirements.matchModel`.
+- [ ] `pnpm requirements:matrix` (côté crmcoaching) reflète les attachments faits par le step (issue → REQ).
+- [ ] README du plugin local documente : activation via `stack.yml`, override delta vs upstream, comment relancer `./sync-plugins.sh --local`.
+- [ ] Tests fixtures : 3 issues × 5 REQ → snapshot du menu + assertion sur mutation REQ.
+- [ ] Re-run `/dev #42` ou `/req #42` détecte l'attachment existant et propose `[Keep existing]` par défaut (pas de double-attach).
+
+## Open Questions
+
+- **Q1 — Cutoffs scoring LLM** : les seuils 0.3 / 0.8 sont initiaux. À calibrer sur fixtures réelles avant fin V2. Investigation pendant `/plan` ou `/implement`.
+- **Q2 — Prompt LLM matching** : template + few-shot examples à finaliser. Doit comparer titre+body issue vs frontmatter REQ (`title`, `domain`, `acceptance_criteria` si présent). Spike de prompt engineering avant V2.
+- **Q3 — Domaine pour create-stub sans label** : si l'issue n'a pas de `area:*`, sur quel dossier `functional/{domain}/` créer le stub ? Proposer `AskUserQuestion` listant les domaines existants ? Default `functional/uncategorized/` ?
+- **Q4 — Format multi-attach** : si user choisit `multiSelect` sur 2+ matches, attach à tous ? La spec consomme alors `req: [REQ-A, REQ-B]` ou `req: REQ-A` (premier) ? À cadrer pendant `/spec` (méta-spec sur cette spec) ou `/plan`.
+- **Q5 — REQ NFR transverses** : la convention `non-functional/` n'est pas scopée par `area:*` (les NFR s'appliquent à plusieurs domaines). Si on veut une action "Lier à un NFR" en v2, comment scoper ? Heuristique mots-clés (PII, latence, GDPR) seulement, ou prompt LLM séparé ?
+- **Q6 — Override `dev` upstream-safe** : le format de l'override (patch entier vs diff de pipeline) — chercher si dev-core a un mécanisme d'extension officiel (hook plugin) avant de patcher SKILL.md directement. À investiguer pendant `/plan`.
