@@ -1,0 +1,39 @@
+---
+id: REQ-AUTH-001
+title: "Magic-link login"
+status: approved
+priority: must
+type: functional
+domain: auth
+sources:
+  - type: prd
+    ref: "PRD section 2.1 — Auth"
+acceptance_criteria:
+  - id: AC-1
+    given: "Un utilisateur saisit son email sur la page de login"
+    when: "Il clique sur 'Envoyer le lien'"
+    then: "Un email contenant un lien HMAC-signé valide 15 min est envoyé"
+  - id: AC-2
+    given: "Un utilisateur clique sur un lien magique valide"
+    when: "Le HMAC est vérifié"
+    then: "Une session est créée et l'utilisateur est redirigé vers le dashboard"
+related:
+  issues: [5]
+  specs: ["artifacts/specs/5-magic-link-spec.mdx"]
+  adrs: ["docs/architecture/adr/042-magic-link-hmac-stateful.md"]
+  prs: [5]
+  blocks: []
+  blocked_by: []
+implementation:
+  files: ["apps/api/src/auth/magic-link.ts"]
+  tests: ["apps/api/src/auth/magic-link.spec.ts"]
+owner: hervé
+created: 2026-01-10
+updated: 2026-02-15
+---
+
+# REQ-AUTH-001 : Magic-link login
+
+## Description
+
+Login sans mot de passe via lien email signé HMAC.

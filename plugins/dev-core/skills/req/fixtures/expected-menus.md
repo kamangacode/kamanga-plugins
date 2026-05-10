@@ -1,0 +1,141 @@
+# Expected menus (T14)
+
+Manual walk-through of `/req --issue N` Steps 1-7 on each fixture. Captures the expected `AskUserQuestion` options the skill should produce. Used by T38 (menu snapshot test) for diff.
+
+Assumptions :
+- `stack.yml.requirements.enabled: true`
+- `stack.yml.requirements.root: docs/requirements/` (mapped to `fixtures/reqs/` for testing)
+- All 5 REQ fixtures live under `fixtures/reqs/` (no domain subfolder for fixture simplicity ; production = `functional/{domain}/`)
+- LLM model = `claude-haiku-4-5` (V2)
+
+---
+
+## Issue #42 — Coach cancels booking + refund
+
+**Labels :** `area:booking`, `type:feature`, `size:M`
+
+### V1 (label-only) — expected menu
+
+Step 3 scope : `area:booking` → only REQ-BOOKING-* candidates → `[001, 002, 003]`.
+Step 5 detect : no existing attachment → no `[Keep existing]`.
+Step 6 (V2) skipped in V1. Menu lists REQs alphabetically by id.
+
+```
+[Attach REQ-BOOKING-001: Annulation de réservation par le client]
+[Attach REQ-BOOKING-002: Email de confirmation de réservation]
+[Attach REQ-BOOKING-003: Annulation de réservation par le coach]
+[Create new REQ stub]
+[Skip with reason]
+```
+
+### V2 (with LLM scoring) — expected menu
+
+Expected scores (from prompt template) :
+- REQ-BOOKING-001 : 0.85 (sibling of cancel-by-coach, very close)
+- REQ-BOOKING-003 : 0.92 (direct match — REQ literally is "cancel-by-coach")
+- REQ-BOOKING-002 : 0.30 (touches email but different concern)
+
+Ranked menu :
+```
+[Attach REQ-BOOKING-003: Annulation de réservation par le coach]   (match) — direct match: cancel-by-coach
+[Attach REQ-BOOKING-001: Annulation de réservation par le client]  (match) — sibling flow, same domain + refund logic
+[Attach REQ-BOOKING-002: Email de confirmation de réservation]     (low confidence) — touches email but different concern
+[Create new REQ stub]
+[Skip with reason]
+```
+
+---
+
+## Issue #43 — Daily cleanup of stale drafts (chore)
+
+**Labels :** `type:chore`, `size:S`
+
+### V1 (label-only) — expected menu
+
+Step 3 scope : no `area:*` → fallback global scan + warn.
+All 5 REQ fixtures are candidates.
+Step 5 : no existing attachment.
+
+```
+[!] Warning: no `area:*` label — scanning all functional REQs
+
+[Attach REQ-AUTH-001: Magic-link login]
+[Attach REQ-AUTH-002: Invitation token avec context pré-rempli]
+[Attach REQ-BOOKING-001: Annulation de réservation par le client]
+[Attach REQ-BOOKING-002: Email de confirmation de réservation]
+[Attach REQ-BOOKING-003: Annulation de réservation par le coach]
+[Create new REQ stub]
+[Skip with reason]
+```
+
+### V2 (with LLM scoring) — expected menu
+
+All scores < 0.3 (chore unrelated to functional REQs). Fallback : top-2 with `weak match` label.
+
+```
+[!] Warning: no `area:*` label — scanning all functional REQs
+
+[Skip with reason]                                                 ← suggested first
+[Create new REQ stub]
+[Attach REQ-BOOKING-002: Email de confirmation de réservation]   (weak match) — both touch async/scheduled flows
+[Attach REQ-AUTH-001: Magic-link login]                          (weak match) — both touch lifecycle/expiration
+```
+
+Expected user choice : `[Skip with reason: 'cleanup chore, no functional requirement']`.
+
+---
+
+## Issue #44 — Magic-link + booking pre-fill
+
+**Labels :** `area:auth`, `area:booking`, `type:feature`, `size:L`
+
+### V1 (label-only) — expected menu
+
+Step 3 scope : multi-label union → REQ-BOOKING-* + REQ-AUTH-* → all 5 fixtures.
+Step 5 : no existing attachment.
+
+```
+[Attach REQ-AUTH-001: Magic-link login]
+[Attach REQ-AUTH-002: Invitation token avec context pré-rempli]
+[Attach REQ-BOOKING-001: Annulation de réservation par le client]
+[Attach REQ-BOOKING-002: Email de confirmation de réservation]
+[Attach REQ-BOOKING-003: Annulation de réservation par le coach]
+[Create new REQ stub]
+[Skip with reason]
+```
+
+### V2 (with LLM scoring) — expected menu
+
+Expected scores :
+- REQ-AUTH-002 : 0.88 (direct — invitation token + context = exact match)
+- REQ-AUTH-001 : 0.55 (parent dependency, magic-link mechanism)
+- REQ-BOOKING-002 : 0.20 (booking creation flow but different trigger)
+- REQ-BOOKING-001, REQ-BOOKING-003 : ≤ 0.15 (cancel ≠ create)
+
+Ranked menu :
+```
+[Attach REQ-AUTH-002: Invitation token avec context pré-rempli]   (match) — direct: invitation token + pre-fill context
+[Attach REQ-AUTH-001: Magic-link login]                            (low confidence) — underlying auth mechanism, but scope is the extension
+[Create new REQ stub]
+[Skip with reason]
+```
+
+Expected user choice : `[Attach REQ-AUTH-002]` (recommended). User may also opt to multi-attach by re-running `/req --issue 44` after first attach.
+
+---
+
+## Idempotency check (V1+V2)
+
+Re-running `/req --issue 42` after first run (which attached REQ-BOOKING-003) :
+
+Step 5 detect : `REQ-BOOKING-003.related.issues = [42]` → `existing = [REQ-BOOKING-003]`.
+
+Menu first option becomes `[Keep existing attachment(s): REQ-BOOKING-003]`. Selecting it = no-op (idempotent).
+
+```
+[Keep existing attachment(s): REQ-BOOKING-003]                     ← recommended
+[Attach REQ-BOOKING-001: Annulation de réservation par le client]  (match)
+[Attach REQ-BOOKING-002: Email de confirmation de réservation]     (low confidence)
+[Create new REQ stub]
+[Skip with reason]
+```

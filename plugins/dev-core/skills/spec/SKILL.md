@@ -93,6 +93,19 @@ Glob `artifacts/specs/{N}-*`, `artifacts/specs/*{slug}*`.
 → Q: **Proceed** | **Adjust approach** | **Abort**
 ¬`--audit` → skip to Step 2.
 
+## Step 1c — Query attached REQs
+
+If `stack.yml.requirements.enabled == true` and the `/req` step ran prior (Σ.requirements):
+
+```bash
+R=$(yq '.requirements.root' .claude/stack.yml || echo 'docs/requirements/')
+grep -l "related.issues:.*\b${N}\b" ${R}/**/*.mdx 2>/dev/null | xargs -I {} grep -m1 "^id:" {} | awk '{print $2}'
+```
+
+Cache `attached_reqs := [REQ-X, ...]`. Used in Step 2 for frontmatter pre-fill.
+
+`stack.yml.requirements.enabled ≠ true` ∨ ¬match ⇒ skip silently. ¬error.
+
 ## Step 2 — Generate Spec
 
 `Ω, args: "--promote artifacts/analyses/{N}-{slug}-analysis.mdx"` (or frame path if no α).
@@ -102,6 +115,11 @@ Interview pre-fills from SRC. Focus on gaps to spec level:
 - Breadboard: affordance tables (UI/API elements → handlers → data)
 - Slices: vertical increments, independently demo-able
 - Ambiguity detection via 9-category taxonomy (see interview SKILL.md)
+
+Frontmatter pre-fill (from Step 1c) :
+- `attached_reqs.length == 1` → `req: REQ-X`
+- `attached_reqs.length > 1` → `req: [REQ-X, REQ-Y]`
+- `attached_reqs.length == 0` → omit `req:` key entirely
 
 Write σ. Must include:
 

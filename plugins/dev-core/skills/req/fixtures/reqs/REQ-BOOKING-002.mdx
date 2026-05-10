@@ -1,0 +1,35 @@
+---
+id: REQ-BOOKING-002
+title: "Email de confirmation de réservation"
+status: implemented
+priority: must
+type: functional
+domain: booking
+sources:
+  - type: prd
+    ref: "PRD section 4.1"
+acceptance_criteria:
+  - id: AC-1
+    given: "Une réservation est créée"
+    when: "Le système confirme la réservation"
+    then: "Un email de confirmation est envoyé au client avec lien calendrier"
+related:
+  issues: [12]
+  specs: []
+  adrs: []
+  prs: []
+  blocks: []
+  blocked_by: []
+implementation:
+  files: ["apps/api/src/booking/send-confirmation.ts"]
+  tests: ["apps/api/src/booking/send-confirmation.spec.ts"]
+owner: hervé
+created: 2026-02-01
+updated: 2026-03-12
+---
+
+# REQ-BOOKING-002 : Email de confirmation de réservation
+
+## Description
+
+Envoi automatique d'email à la création de réservation.

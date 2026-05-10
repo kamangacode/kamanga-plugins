@@ -1,0 +1,11 @@
+{
+  "number": 44,
+  "title": "Magic-link login should also create a booking if invitation token is present",
+  "body": "When a coach invites a client via email, the invitation contains both a magic-link auth token and a pre-filled booking slot. Clicking the link should authenticate the user and create the draft booking in one step.",
+  "labels": [
+    { "name": "area:auth" },
+    { "name": "area:booking" },
+    { "name": "type:feature" },
+    { "name": "size:L" }
+  ]
+}

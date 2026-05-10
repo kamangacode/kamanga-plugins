@@ -1,0 +1,10 @@
+{
+  "number": 42,
+  "title": "Coach can cancel a booking and refund the client",
+  "body": "When a coach cancels a confirmed session, the system must refund the client and notify them by email. The refund flow should respect the existing payment provider (Stripe) and the cancel deadline rules from the booking policy.",
+  "labels": [
+    { "name": "area:booking" },
+    { "name": "type:feature" },
+    { "name": "size:M" }
+  ]
+}
