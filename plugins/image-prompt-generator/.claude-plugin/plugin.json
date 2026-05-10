@@ -1,8 +1,0 @@
-{
-  "name": "image-prompt-generator",
-  "version": "0.1.0",
-  "description": "Generate AI image prompts with visual identity and style consistency.",
-  "author": {
-    "name": "Roxabi"
-  }
-}

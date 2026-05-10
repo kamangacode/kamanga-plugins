@@ -1,10 +1,10 @@
 {
-  "name": "roxabi-marketplace",
+  "name": "kamanga-marketplace",
   "version": "1.0.0",
-  "description": "Open-source Claude Code plugins by Roxabi — context engineering tools for teams.",
+  "description": "Claude Code plugins by Kamanga — context engineering tools for teams.",
   "owner": {
-    "name": "Roxabi",
-    "url": "https://github.com/Roxabi"
+    "name": "Kamanga",
+    "url": "https://github.com/kamangacode"
   },
   "plugins": [
     {
@@ -27,94 +27,8 @@
     },
     {
       "name": "dev-core",
-      "description": "Full development workflow — frame, shape, plan, implement, review, ship. Opinionated Roxabi process with 29 skills, 9 agents, and safety hooks.",
+      "description": "Full development workflow — frame, shape, plan, implement, review, ship. Opinionated process with 29 skills, 9 agents, and safety hooks.",
       "source": "./plugins/dev-core",
-      "category": "development",
-      "version": "0.1.0"
-    },
-    {
-      "name": "linkedin-post-generator",
-      "description": "Generate engaging LinkedIn posts with best practices and visual identity.",
-      "source": "./plugins/linkedin-post-generator",
-      "category": "content"
-    },
-    {
-      "name": "image-prompt-generator",
-      "description": "Generate AI image prompts with visual identity and style consistency.",
-      "source": "./plugins/image-prompt-generator",
-      "category": "productivity"
-    },
-    {
-      "name": "cv",
-      "description": "Generate and adapt CVs from structured JSON data, with tailoring for specific job postings.",
-      "source": "./plugins/cv",
-      "category": "productivity"
-    },
-    {
-      "name": "get-invoice-details",
-      "description": "Extract structured data from invoice documents (text or PDF) and store as JSON.",
-      "source": "./plugins/get-invoice-details",
-      "category": "productivity"
-    },
-    {
-      "name": "linkedin-apply",
-      "description": "Scrape LinkedIn job offers and score them against your profile with Claude LLM — APPLY / REVIEW / SKIP decisions with 4-dimension scoring.",
-      "source": "./plugins/linkedin-apply",
-      "category": "productivity"
-    },
-    {
-      "name": "react-best-practices",
-      "description": "React and Next.js performance optimization guidelines — 58 rules across 8 categories, prioritized by impact.",
-      "source": "./plugins/react-best-practices",
-      "category": "development",
-      "version": "0.1.0"
-    },
-    {
-      "name": "composition-patterns",
-      "description": "React composition patterns — avoid boolean prop proliferation, compound components, context providers.",
-      "source": "./plugins/composition-patterns",
-      "category": "development",
-      "version": "0.1.0"
-    },
-    {
-      "name": "mattpocock-skills",
-      "description": "Curated skills by Matt Pocock — grill-me (relentless plan interviewer), caveman (compressed mode), diagnose (feedback-loop-first debugging), to-issues (tracer-bullet slicing), grill-with-docs (domain-model stress-test).",
-      "source": "./plugins/mattpocock-skills",
-      "category": "workflow",
-      "version": "1.0.0"
-    },
-    {
-      "name": "web-design-guidelines",
-      "description": "Review UI code for Web Interface Guidelines compliance — accessibility, UX, design best practices.",
-      "source": "./plugins/web-design-guidelines",
-      "category": "development",
-      "version": "0.1.0"
-    },
-    {
-      "name": "logo-generator",
-      "description": "Generate animated SVG logos from a config-driven brand brief — interactive design, live preview, GIF/PNG export.",
-      "source": "./plugins/logo-generator",
-      "category": "branding",
-      "version": "0.2.0"
-    },
-    {
-      "name": "content-lab",
-      "description": "Analyze YouTube videos to extract narrative structure, VAKOG sensory predicates, and reusable content creation recipes.",
-      "source": "./plugins/content-lab",
-      "category": "content",
-      "version": "0.1.0"
-    },
-    {
-      "name": "idna",
-      "description": "IDNA — Idea DNA evolutionary selector. Explore variants, pick a winner, converge through amplify/blend/refine mutations. Self-driving: browser → Claude CLI → imageCLI → auto-advance.",
-      "source": "./plugins/idna",
-      "category": "productivity",
-      "version": "0.1.0"
-    },
-    {
-      "name": "gitnexus",
-      "description": "GitNexus CLI integration — code knowledge graph tools (impact analysis, symbol context, query). CLI-only alternative to MCP for minimal token overhead.",
-      "source": "./plugins/gitnexus",
       "category": "development",
       "version": "0.1.0"
     }
