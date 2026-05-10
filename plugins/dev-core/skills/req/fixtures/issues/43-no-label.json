@@ -1,0 +1,9 @@
+{
+  "number": 43,
+  "title": "Add daily cleanup job for stale draft sessions",
+  "body": "Sessions left in draft state for more than 7 days clutter the dashboard. Add a scheduled job that removes them. Should run nightly at 02:00 UTC.",
+  "labels": [
+    { "name": "type:chore" },
+    { "name": "size:S" }
+  ]
+}

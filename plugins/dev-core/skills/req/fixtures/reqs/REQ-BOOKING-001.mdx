@@ -1,0 +1,43 @@
+---
+id: REQ-BOOKING-001
+title: "Annulation de réservation par le client"
+status: approved
+priority: must
+type: functional
+domain: booking
+sources:
+  - type: prd
+    ref: "PRD section 4.2 — Cancellation policy"
+acceptance_criteria:
+  - id: AC-1
+    given: "Une réservation confirmée existe"
+    when: "Le client clique sur Annuler avant H-24"
+    then: "La réservation passe au statut canceled et un remboursement complet est initié"
+  - id: AC-2
+    given: "Une réservation confirmée existe"
+    when: "Le client clique sur Annuler après H-24"
+    then: "L'annulation est refusée avec message explicite"
+related:
+  issues: []
+  specs: []
+  adrs: []
+  prs: []
+  blocks: []
+  blocked_by: []
+implementation:
+  files: []
+  tests: []
+owner: hervé
+created: 2026-04-15
+updated: 2026-04-15
+---
+
+# REQ-BOOKING-001 : Annulation de réservation par le client
+
+## Description
+
+Permettre au client d'annuler une réservation confirmée avant un délai limite (24h), avec remboursement automatique.
+
+## Contexte métier
+
+Demande client récurrente. Réduit le support manuel (15% des tickets en mars 2026).

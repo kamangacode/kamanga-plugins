@@ -1,0 +1,39 @@
+---
+id: REQ-BOOKING-003
+title: "Annulation de réservation par le coach"
+status: draft
+priority: should
+type: functional
+domain: booking
+sources:
+  - type: feedback
+    ref: "Coach Sophie, 2026-04-20"
+acceptance_criteria:
+  - id: AC-1
+    given: "Une réservation confirmée existe"
+    when: "Le coach annule via dashboard"
+    then: "Le client est remboursé et notifié par email"
+  - id: AC-2
+    given: "Le coach annule moins de 24h avant"
+    when: "L'annulation est confirmée"
+    then: "Le client reçoit un crédit de session offert en plus du remboursement"
+related:
+  issues: []
+  specs: []
+  adrs: []
+  prs: []
+  blocks: []
+  blocked_by: []
+implementation:
+  files: []
+  tests: []
+owner: hervé
+created: 2026-04-21
+updated: 2026-04-21
+---
+
+# REQ-BOOKING-003 : Annulation de réservation par le coach
+
+## Description
+
+Pendant du REQ-BOOKING-001 côté coach, avec règles de compensation différentes.

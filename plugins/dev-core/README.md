@@ -56,7 +56,7 @@ Where `#N` is a GitHub issue number. The orchestrator scans existing artifacts, 
 
 ## Skills
 
-31 skills organized by workflow phase:
+32 skills organized by workflow phase:
 
 | Skill | Phase | Description |
 |-------|-------|-------------|
@@ -72,7 +72,8 @@ Where `#N` is a GitHub issue number. The orchestrator scans existing artifacts, 
 | `frame` | Frame | Creates initial feature frame from issue |
 | `analyze` | Shape | Deep analysis with expert consultation |
 | `consensus` | Shape | Multi-expert panel — spawns 3 domain agents (architect + 2 context-selected) to debate and agree on best long-term solution |
-| `spec` | Shape | Generates specifications with smart splitting |
+| `spec` | Shape | Generates specifications with smart splitting. **Local override**: reads attached REQs from `docs/requirements/` and pre-fills `req:` frontmatter |
+| `req` | Shape | **Local addition** — Identifies or creates a REQ for an issue (attach / create-stub / skip with reason). Auto-invoked by `/dev` between `analyze` and `spec` when `stack.yml.requirements.enabled: true`. Standalone-safe via `/req --issue N` |
 | `interview` | Shape | Interactive requirements gathering |
 | `plan` | Build | Creates implementation plan with micro-tasks |
 | `implement` | Build | Executes implementation from plan — merge conflict recovery, abandon-on-3-failures option |
@@ -121,6 +122,30 @@ Each agent frontmatter includes a `# capabilities:` comment (`write_knowledge`, 
 | `architect` | Architecture decisions, ADRs |
 | `product-lead` | Analysis, specifications, issue management |
 | `doc-writer` | Documentation across all docs directories |
+
+## Override delta vs upstream
+
+This plugin is a **kamanga-plugins fork** of `dev-core@roxabi-marketplace`. Local modifications :
+
+| Path | Type | Purpose |
+|------|------|---------|
+| `skills/req/` | NEW skill | `/req --issue N` — REQ identification step (attach / create-stub / skip). See [skills/req/README.md](skills/req/README.md) |
+| `skills/dev/SKILL.md` | MODIFY | Inserts `requirements` step in pipeline between `analyze` and `spec`. Adds 2 skip rules (`τ == S`, `¬stack.yml.requirements.enabled`). Updates Σ, phase bar, invocation map |
+| `skills/spec/SKILL.md` | MODIFY | Adds Step 1c — query attached REQs via grep on `related.issues`. Pre-fills `req:` in spec frontmatter |
+
+**Activation** : add to your project's `.claude/stack.yml` :
+
+```yaml
+requirements:
+  enabled: true
+  root: docs/requirements/
+  validateCmd: pnpm requirements:validate   # optional
+  matchModel: claude-haiku-4-5              # optional, default haiku
+```
+
+When `enabled: false` or section absent, the override is a no-op : `/dev` and `/spec` behave identically to upstream. Adoption is opt-in per project.
+
+**Sync** : after editing source under `plugins/dev-core/`, run `./sync-plugins.sh --local` to propagate to `~/.claude/plugins/cache/`.
 
 ## Project-Level Overrides
 
