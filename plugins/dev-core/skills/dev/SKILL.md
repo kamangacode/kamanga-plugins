@@ -78,10 +78,11 @@ bash ${CLAUDE_SKILL_DIR}/scan-state.sh {N} {slug}
 φ ∃ → read frontmatter → extract `status`, `tier`.
 
 Σ = {
-  triage:    issue ∃,
-  frame:     φ ∃ ∧ φ.status == 'approved',
-  analyze:   analysis artifact ∃,
-  spec:      spec artifact ∃,
+  triage:        issue ∃,
+  frame:         φ ∃ ∧ φ.status == 'approved',
+  analyze:       analysis artifact ∃,
+  requirements:  ∃ REQ ∈ {R}/**/*.mdx with `related.issues: [N]` ∨ `## Requirements skipped` ∈ φ,
+  spec:          spec artifact ∃,
   plan:      plan artifact ∃,
   implement: worktree ∃ (path: `.claude/worktrees/{N}-*` ∨ legacy `../${REPO}-{N}`) ∧ branch has commits beyond staging,
   pr:        PR ∃,
@@ -113,7 +114,7 @@ Claude Code task list drives in-session progress for the dev pipeline. Treat it 
 
 Ordered step list:
 ```
-triage → frame → analyze → spec → plan → implement → pr →
+triage → frame → analyze → requirements → spec → plan → implement → pr →
 ci-watch → validate → review → fix → promote → cleanup
 ```
 
@@ -152,7 +153,7 @@ Wire dependencies sequentially — ∀ i > 0: `TaskUpdate(task[i].id, addBlocked
 → Next: {S*} — {one-line description}
 ```
 
-Bar: `██`=done/skipped, `░░`=pending. Phases: Frame:{triage,frame} | Shape:{analyze,spec} | Build:{plan,implement,pr} | Verify:{ci-watch,validate,review,fix} | Ship:{promote,cleanup}
+Bar: `██`=done/skipped, `░░`=pending. Phases: Frame:{triage,frame} | Shape:{analyze,requirements,spec} | Build:{plan,implement,pr} | Verify:{ci-watch,validate,review,fix} | Ship:{promote,cleanup}
 
 Status: `✓ {name}` (done) | `skipped` | `pending` | `→ next`.
 
@@ -160,16 +161,18 @@ Status: `✓ {name}` (done) | `skipped` | `pending` | `→ next`.
 
 ```
 should_skip(step, τ, Σ):
-  triage   ∧ Σ.triage                    → skip (already done)
-  frame    ∧ τ == S                       → skip
-  analyze  ∧ τ ∈ {S, F-lite}             → skip (frame sufficient)
-  spec     ∧ τ == S                       → skip
-  plan     ∧ τ == S                       → skip
-  ci-watch ∧ ¬PR ∃                         → skip
-  fix      ∧ (Σ.fix ∨ Σ_s.fix)            → skip (fixes already applied)
-  promote                                  → skip (/promote is standalone staging→main; ¬auto-triggered by /dev)
-  cleanup  ∧ ¬has_stale(N)               → skip
-  default                                 → false
+  triage       ∧ Σ.triage                                    → skip (already done)
+  frame        ∧ τ == S                                       → skip
+  analyze      ∧ τ ∈ {S, F-lite}                             → skip (frame sufficient)
+  requirements ∧ τ == S                                       → skip
+  requirements ∧ ¬stack.yml.requirements.enabled              → skip silently
+  spec         ∧ τ == S                                       → skip
+  plan         ∧ τ == S                                       → skip
+  ci-watch     ∧ ¬PR ∃                                         → skip
+  fix          ∧ (Σ.fix ∨ Σ_s.fix)                            → skip (fixes already applied)
+  promote                                                      → skip (/promote is standalone staging→main; ¬auto-triggered by /dev)
+  cleanup      ∧ ¬has_stale(N)                                → skip
+  default                                                      → false
 ```
 
 `--from <step>` ⇒ force-mark all prior steps skipped (warn once).
@@ -178,11 +181,12 @@ should_skip(step, τ, Σ):
 
 ```
 STEPS = [
-  (Frame,  triage,    issue-triage),
-  (Frame,  frame,     frame),
-  (Shape,  analyze,   analyze),
-  (Shape,  spec,      spec),
-  (Build,  plan,      plan),
+  (Frame,  triage,       issue-triage),
+  (Frame,  frame,        frame),
+  (Shape,  analyze,      analyze),
+  (Shape,  requirements, req),
+  (Shape,  spec,         spec),
+  (Build,  plan,         plan),
   (Build,  implement, implement),
   (Build,  pr,        pr),
   (Verify, ci-watch,  ci-watch),
@@ -242,7 +246,8 @@ audit ∧ S* ∈ critical → reasoning audit per [reasoning-audit.md](${CLAUDE_
 |------|-------|------------------|--------------|
 | triage | adv | `skill: "issue-triage", args: "N"` | frame |
 | frame | gate | `skill: "frame", args: "--issue N"` | analyze (F-full) ∨ spec (F-lite) |
-| analyze | adv | `skill: "analyze", args: "--issue N"` | spec |
+| analyze | adv | `skill: "analyze", args: "--issue N"` | requirements |
+| requirements | adv | `skill: "req", args: "--issue N"` | spec |
 | spec | gate | `skill: "spec", args: "--issue N"` | plan |
 | plan | gate | `skill: "plan", args: "--issue N"` | implement (auto-chain after approval) |
 | implement | adv | `skill: "implement", args: "--issue N"` | pr |

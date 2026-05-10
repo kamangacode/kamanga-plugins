@@ -1,0 +1,211 @@
+---
+title: "Sous-step Requirements automatique dans le cycle /dev (override kamanga-plugins)"
+description: Analyse comparée pour insérer un step `requirements` entre frame et spec dans la pipeline /dev de dev-core, hébergé dans kamanga-plugins.
+issue: 1
+---
+
+## Source
+
+> "est-ce que les requirements seront écrits automatiquement dans le cycle de développement actuel? Donc, on a les artefacts : frame, cadrage, analyse, spec, plan etc Mais est-ce qu'on aura la doc requirement écrite automatiquement dans le cycle?"
+>
+> — utilisateur (interview /interview, 2026-05-10)
+
+> "Hook au niveau /dev — étendre l'orchestrateur dev-core pour qu'il appelle un nouveau sous-step 'Requirements' entre Frame et Spec : il lit l'issue, détecte les REQs existants par mots-clés/domain, propose soit d'attacher l'issue à un REQ existant (mise à jour status + related.issues/specs), soit de créer un nouveau REQ stub pré-rempli depuis le frame. Plus puissant mais demande de toucher au plugin dev-core."
+>
+> — direction validée par l'utilisateur après réponse de cadrage
+
+> "Tu vas générer les artefacts dans le dossier artefacts de kamanga-plugins."
+>
+> — précision de scope (les artefacts vivent dans le repo plugins, pas dans crmcoaching)
+
+## Problem
+
+La pipeline `/dev` de dev-core (`triage → frame → analyze → spec → plan → implement → ...`) ne contient pas d'étape "Requirements". Or `crmcoaching` a livré (PR #648, ADR-048+049) un référentiel `docs/requirements/` avec une convention claire : chaque issue doit identifier ou créer un REQ, mettre à jour son `status` au fil du cycle, et attacher la spec via `related.specs`.
+
+Aujourd'hui cette étape est **documentée** dans `docs/processes/dev-process.md` mais **non exécutée** par l'orchestrateur. Conséquence : les REQs ne sont créés ou mis à jour que si l'humain (ou l'agent) y pense. La discipline tient sur la mémoire, pas sur le pipeline. À mesure que d'autres domaines viennent enrichir le référentiel (76 REQs en cours de backfill au moment de cette analyse), l'oubli devient coûteux : matrice de traçabilité incomplète, REQs qui restent en `draft` éternellement, status qui ne reflète pas la réalité.
+
+## Outcome
+
+Quand un agent (ou un dev humain via Claude Code) lance `/dev #N` :
+
+1. Si l'issue concerne une feature (Tier F-lite ou F-full), la pipeline s'arrête entre frame et spec pour exécuter un step `requirements`.
+2. Le step détecte les REQs existants pertinents pour l'issue (via labels GitHub `area:*` + analyse LLM des frontmatters).
+3. Il propose au choix : attacher à un REQ existant (mise à jour `status` + `related.issues/specs`), créer un nouveau REQ stub pré-rempli depuis le frame, ou justifier le skip exceptionnel.
+4. L'état est persisté dans `Σ.requirements` (state map de l'orchestrateur), de sorte que `/dev --from spec` ou un re-run ne demande pas à nouveau.
+
+Le développeur ne « se souvient » plus de l'étape : elle est dans la pipeline.
+
+## Appetite
+
+**1 à 2 jours** pour un MVP fonctionnel sur `crmcoaching` :
+- Skill local (override) dans kamanga-plugins
+- Détection hybride label → LLM
+- 2 actions (attach / create-stub) + skip explicite
+- Persistance d'état alignée sur la convention `Σ` de dev-core
+
+Hors appetite : génération automatique des ACs depuis le frame (LLM trop libre, risque d'hallucination), mise à jour automatique du `status` à chaque transition (peut venir en v2), génération de la matrice de traçabilité dans le sous-step (reste séparée via `pnpm requirements:matrix`).
+
+## Context
+
+### État actuel (constaté en lisant le code)
+
+- **Pipeline `/dev`** : SKILL.md à `kamanga-plugins/plugins/dev-core/skills/dev/SKILL.md` (v0.2.0). Pipeline canonique :
+  ```
+  triage → frame → analyze → spec → plan → implement → pr →
+                                                       ci-watch → validate → review → fix → cleanup
+  ```
+  Skip rules : `frame ∧ τ == S → skip` ; `analyze ∧ τ ∈ {S, F-lite} → skip` ; `spec ∧ τ == S → skip`.
+- **Référentiel REQ (crmcoaching)** : `docs/requirements/` avec frontmatter Zod typé, ID format `REQ-{DOMAIN}-{NNN}`, scripts `pnpm requirements:{validate,matrix,coverage,run-tests,test}`, ADR-048+049, README détaillé.
+- **Doc processus** : `crmcoaching/docs/processes/dev-process.md` lignes 49-65 documente l'étape Requirements comme manuelle ("À partir de l'issue #627, chaque feature doit identifier ou créer un ou plusieurs requirements...").
+- **Plugin local** : `kamanga-plugins/plugins/dev-core/` est un fork local du plugin `dev-core@roxabi-marketplace` activé dans `.claude/settings.json`. Permet d'overrider sans patcher upstream.
+
+### Prior art
+
+Aucune step équivalente dans dev-core upstream. Le pattern le plus proche est `triage` (qui crée/met à jour l'issue GitHub) — il s'appelle au tout début de la pipeline et écrit dans un système externe (GitHub). Le step `requirements` aurait une structure similaire : lire un état externe (les REQs sur disque), proposer une action, exécuter, persister dans `Σ`.
+
+### Convention REQ pertinente pour l'auto-détection
+
+- Frontmatter REQ contient : `id`, `title`, `domain` (kebab-case), `status`, `priority`, `acceptance_criteria`, `related.issues/specs/adrs/blocks/blocked_by`, `implementation.files/tests`.
+- Mapping domaine ↔ label GitHub : `area:booking` → `domain: booking` → dossier `docs/requirements/functional/booking/`. Direct.
+
+## Questions Explored
+
+1. Dans quelle granularité héberger le step (skill autonome, inline dans /dev, hook événementiel) ?
+2. Comment détecter les REQs existants pertinents sans faux positifs/négatifs excessifs ?
+3. Comment gérer le cas no-match (créer obligatoire vs skip explicite vs autoriser plusieurs) ?
+4. Comment persister l'état pour cohérence avec les autres steps de `/dev` (Σ, artifacts, frontmatter) ?
+5. Comment rendre l'override portable (pour d'autres projets adoptant la convention REQ) ?
+6. Comment intégrer les NFRs transverses qui s'appliquent à plusieurs features ?
+
+## Analysis
+
+### Détection : pourquoi hybride label → LLM
+
+| Approche | Précision | Recall | Coût | Reproductibilité |
+|----------|-----------|--------|------|------------------|
+| Label strict | élevée si triage propre | faible si label oublié | nul | parfaite |
+| LLM seul (titres+body) | moyenne (faux positifs sur termes communs) | élevée | élevé | moyenne |
+| Hybride label → LLM | élevée | élevée si label présent | modéré | bonne |
+| Full-text (grep) | faible | très faible | nul | parfaite |
+
+Hybride : si `area:X` présent, scope sur `docs/requirements/functional/X/` (lit ~5-15 frontmatters). LLM compare titre+body issue avec frontmatters et propose 0-N matches avec confiance. User valide via AskUserQuestion avec preview du REQ candidat. Si label absent, fallback sur scan global (plus cher mais récupération possible).
+
+### Gestion no-match
+
+3 actions standard (présentées via AskUserQuestion) :
+
+- **Create stub** : `cp _template.mdx → REQ-{DOMAIN}-{next}.mdx`, pré-remplit `id`, `title`, `domain`, `sources` (issue), `related.issues=[N]`, ACs en `[NEEDS CLARIFICATION]` à compléter dans la spec. `status: draft`.
+- **Attach to existing** : update `related.issues` du REQ choisi pour ajouter N. Si transition de status appropriée (ex. `draft` → `proposed` quand spec en cours), proposer.
+- **Skip with justification** : autorisé seulement avec un `reason: <texte>`. Loggé dans `Σ.requirements.skipped[N] = reason`. Bloquant en gate review : "Cette PR n'a pas de REQ. Justification : <reason>. Confirmez ?"
+
+### NFRs transverses
+
+Le step ne propose pas de scanner les NFRs par défaut (ils s'appliquent à beaucoup d'issues, faux positifs). Il offre une action secondaire **"Lier à un NFR"** dans le menu de validation, qui scope sur `docs/requirements/non-functional/` et propose les REQs NFR potentiellement applicables (RGPD si l'issue touche des PII, perf si l'issue ajoute un endpoint hot, etc.). Le LLM applique des heuristiques simples (mots-clés "PII", "GDPR", "endpoint", "latence") pour proposer.
+
+### Persistance d'état
+
+Aligné sur le pattern `Σ` de dev-core :
+
+```
+Σ.requirements := {
+  status: 'attached' | 'created' | 'skipped' | null,
+  reqIds: string[],          // ['REQ-BOOKING-005']
+  skipReason: string | null,
+  resolvedAt: ISO date,
+}
+```
+
+Persisté dans le frame artifact (`artifacts/frames/{N}-{slug}-frame.mdx`) sous une nouvelle section `## Requirements` ou dans un artifact dédié `artifacts/requirements/{N}-{slug}-attachment.mdx`. La spec consomme cet état pour pré-remplir son frontmatter (`req: REQ-BOOKING-005`).
+
+### Portabilité
+
+Le plugin dev-core upstream est utilisé par plusieurs projets. Notre override doit rester adoptable :
+
+- Configuration via `stack.yml` (déjà existant) : section `requirements: { enabled: true, root: 'docs/requirements/', validateCmd: 'pnpm requirements:validate' }`.
+- Si `requirements.enabled == false` ou si `stack.yml` ne contient pas la section : le step skip silencieusement (pas d'erreur).
+- Documentation dans le plugin README expliquant comment activer.
+
+## Shapes
+
+### Shape 1 : Skill autonome `/req` + override `dev` SKILL.md
+
+Créer un nouveau skill `kamanga-plugins/plugins/dev-core/skills/req/SKILL.md` qui implémente la logique (détection, AskUserQuestion, écriture). Modifier `kamanga-plugins/plugins/dev-core/skills/dev/SKILL.md` pour insérer une étape `requirements` dans la pipeline (entre `frame`/`analyze` et `spec`).
+
+- **Description** : skill séparé invocable indépendamment (`/req #42`) ou via la pipeline. L'override de `dev` ajoute juste l'appel.
+- **Trade-offs** :
+  - + Réutilisable : on peut lancer `/req` manuellement sur une issue arbitraire sans passer par `/dev`.
+  - + Test isolé : le skill `req` peut avoir ses propres fixtures/tests.
+  - + Aligné sur la philosophie dev-core (chaque step est un skill).
+  - − Demande 2 fichiers à modifier (skill + override `dev`).
+  - − Risque de divergence si dev-core upstream change la pipeline (override doit suivre).
+- **Rough scope** : ~3-4 fichiers. Effort : 1-1.5j.
+
+### Shape 2 : Logique inline dans le SKILL.md de `dev`
+
+Étendre directement `kamanga-plugins/plugins/dev-core/skills/dev/SKILL.md` (override) pour ajouter la logique du step requirements en inline (pas de skill séparé).
+
+- **Description** : pas de nouveau skill. Toute la logique vit dans le SKILL.md de l'orchestrateur.
+- **Trade-offs** :
+  - + Un seul fichier à toucher.
+  - + Pas de cycle d'appel skill-to-skill.
+  - − SKILL.md de `dev` devient gros (déjà ~250 lignes), violation du principe "un skill, une responsabilité".
+  - − Pas invocable indépendamment (impossible de faire `/req #42` sans passer par `/dev`).
+  - − Plus dur à tester.
+  - − Conflit potentiel si dev-core upstream édite `dev` : merge difficile.
+- **Rough scope** : 1 fichier modifié. Effort : 0.5-1j (mais dette technique forte).
+
+### Shape 3 : Hook PostToolUse sur `/frame`
+
+Configurer un hook `PostToolUse` (matcher : `Skill` avec name=`frame` ou matcher prompt-based) qui exécute un script déclenchant la logique requirements après chaque frame.
+
+- **Description** : pas de modif des skills. Hook configuré dans `.claude/settings.json` du projet `crmcoaching`. Le hook lance un sous-process (par exemple `tsx scripts/req-attach.ts`) qui fait la détection et l'écriture.
+- **Trade-offs** :
+  - + Aucune modif des plugins.
+  - + Spécifique au projet (le hook vit dans `crmcoaching/.claude/settings.json`), pas dans kamanga-plugins.
+  - − Découplé de la pipeline `/dev` : le hook se déclenche sur tout `/frame`, même hors `/dev`. Filtrage compliqué.
+  - − Pas de boucle interactive : le hook ne peut pas facilement présenter `AskUserQuestion` pour choisir attach/create/skip (les hooks sont synchrones et limités).
+  - − Pas de persistance d'état dans `Σ` propre.
+  - − Demande l'ajout d'un script TS séparé à maintenir.
+  - − Si l'utilisateur fait `/frame` sans `/dev` (exploratoire), le hook s'enclenche quand même.
+- **Rough scope** : 1 hook + 1 script. Effort : 1-1.5j mais expérience utilisateur dégradée.
+
+## Fit Check
+
+| Requirement | Shape 1 (skill /req) | Shape 2 (inline /dev) | Shape 3 (hook) |
+|-------------|----------------------|------------------------|----------------|
+| Tier-conditional (skip Tier S) | ✅ via override de la skip table | ✅ inline | ❌ hook s'enclenche tout le temps |
+| Détection hybride label → LLM | ✅ logique dans le skill | ✅ inline | ⚠ scripts externes, complexe |
+| AskUserQuestion interactif (attach/create/skip) | ✅ skill peut AQ | ✅ inline | ❌ hooks synchrones |
+| Persistance Σ.requirements | ✅ skill écrit dans frame artifact | ✅ inline | ⚠ écriture indirecte |
+| Invocable indépendamment (`/req #42`) | ✅ skill autonome | ❌ pipeline-only | ❌ hook only |
+| Maintenabilité (séparation des concerns) | ✅ un skill = une responsabilité | ❌ SKILL.md de `dev` devient gros | ⚠ hook + script |
+| Portable autres projets dev-core | ✅ via stack.yml flag | ✅ via stack.yml flag | ❌ doit copier hook |
+| Effort | 1-1.5j | 0.5-1j | 1-1.5j |
+| Dette technique | faible | moyenne | élevée |
+
+**Selected shape : Shape 1 (skill autonome `/req` + override `dev`)** — meilleur ratio bénéfice/dette, aligné sur la philosophie dev-core (chaque étape = un skill testable, invocable, documentable).
+
+## Conclusions
+
+1. **Shape 1 retenu** : créer `kamanga-plugins/plugins/dev-core/skills/req/SKILL.md` + overrider `kamanga-plugins/plugins/dev-core/skills/dev/SKILL.md` pour insérer l'étape `requirements` entre `frame` (ou `analyze`) et `spec`.
+
+2. **Activation par stack.yml** : le step skip silencieusement si `stack.yml` ne contient pas `requirements.enabled: true`. Permet adoption progressive et compatibilité avec projets sans REQ référentiel.
+
+3. **Détection hybride** : label `area:X` → scope sur `docs/requirements/functional/X/` ; LLM lit titre+body issue + frontmatters et propose 0-N matches avec confiance ; user valide via AskUserQuestion. Fallback scan global si label absent.
+
+4. **3 actions standard** : attach (mise à jour `related.issues`), create-stub (template pré-rempli), skip-with-reason (loggé, bloquant en review).
+
+5. **NFRs en action secondaire** : le step ne scanne pas les NFRs par défaut (faux positifs), mais offre une action "Lier à un NFR" si l'issue mentionne PII/perf/sécu (heuristique mots-clés).
+
+6. **Persistance** : `Σ.requirements` dans le frame artifact (section `## Requirements`), consommé par `/spec` pour pré-remplir le frontmatter.
+
+7. **Hors scope v2 (à reporter en specs séparées)** : auto-création des ACs depuis le frame, mise à jour automatique du `status` à chaque transition, génération matrice dans le sous-step.
+
+## Next Steps
+
+- **Promouvoir cette analyse en spec** : `/interview --promote artifacts/analyses/dev-requirements-substep-analysis.mdx` (sortira `artifacts/specs/{slug}-spec.mdx` dans kamanga-plugins).
+- **Spec doit définir** : structure exacte du SKILL.md de `req`, format de l'override de `dev` (où exactement insérer), schéma de `Σ.requirements`, prompt LLM pour la détection (template + few-shot), flag `stack.yml.requirements.enabled`.
+- **Spec doit lister** : dépendances (`gh issue view`, lecture frontmatter Zod, écriture template), tests fixtures (fake REQs, fake issues), critères de succès (un `/dev #N` Tier F-lite déclenche bien le step et écrit dans le frame).
+- **Plan d'implémentation** ensuite via `/plan`, puis `/implement` dans le repo `kamanga-plugins` (PR vers `staging`).
+- **Après merge** : déploier dans `crmcoaching` en mettant à jour `.claude/plugins/cache/` ou via re-link du plugin local. Test sur une issue F-lite réelle.
+- **Suivi** : ouvrir une PR documentation vers `dev-core` upstream (roxabi-marketplace) si le pattern se révèle utile au-delà de kamanga.

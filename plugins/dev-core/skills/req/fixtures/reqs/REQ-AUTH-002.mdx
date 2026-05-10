@@ -1,0 +1,39 @@
+---
+id: REQ-AUTH-002
+title: "Invitation token avec context pré-rempli"
+status: draft
+priority: should
+type: functional
+domain: auth
+sources:
+  - type: feedback
+    ref: "Coach Marc, 2026-04-08"
+acceptance_criteria:
+  - id: AC-1
+    given: "Un coach invite un client"
+    when: "L'invitation est envoyée"
+    then: "Le lien contient un token HMAC + métadonnées (booking slot, coach id)"
+  - id: AC-2
+    given: "Le client clique sur l'invitation"
+    when: "Le token est validé"
+    then: "Une session est créée et les métadonnées sont disponibles pour pré-remplir l'écran cible"
+related:
+  issues: []
+  specs: []
+  adrs: []
+  prs: []
+  blocks: []
+  blocked_by: ["REQ-AUTH-001"]
+implementation:
+  files: []
+  tests: []
+owner: hervé
+created: 2026-04-10
+updated: 2026-04-10
+---
+
+# REQ-AUTH-002 : Invitation token avec context pré-rempli
+
+## Description
+
+Extension du magic-link standard pour porter du contexte (booking, coach).
