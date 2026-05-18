@@ -81,7 +81,11 @@ bash ${CLAUDE_SKILL_DIR}/scan-state.sh {N} {slug}
   triage:        issue ∃,
   frame:         φ ∃ ∧ φ.status == 'approved',
   analyze:       analysis artifact ∃,
-  requirements:  ∃ REQ ∈ {R}/**/*.mdx with `related.issues: [N]` ∨ `## Requirements skipped` ∈ φ,
+  requirements:  ¬stack.yml.requirements.enabled
+                 ∨ ∃ REQ ∈ {R}/**/*.mdx with `related.issues: [N]`
+                 ∨ `## Requirements skipped` ∈ φ.body
+                 ∨ `requirements: skipped` ∈ σ.frontmatter
+                 ∨ ∃ `.claude/req-skipped/{N}.md`,
   spec:          spec artifact ∃,
   plan:      plan artifact ∃,
   implement: worktree ∃ (path: `.claude/worktrees/{N}-*` ∨ legacy `../${REPO}-{N}`) ∧ branch has commits beyond staging,
@@ -165,7 +169,8 @@ should_skip(step, τ, Σ):
   frame        ∧ τ == S                                       → skip
   analyze      ∧ τ ∈ {S, F-lite}                             → skip (frame sufficient)
   requirements ∧ τ == S                                       → skip
-  requirements ∧ ¬stack.yml.requirements.enabled              → skip silently
+  requirements ∧ ¬stack.yml.requirements.enabled              → skip (log: "requirements disabled")
+  requirements ∧ τ ∈ {F-lite, F-full} ∧ ¬Σ.requirements       → BLOCK (see "BLOCK contract" below)
   spec         ∧ τ == S                                       → skip
   plan         ∧ τ == S                                       → skip
   ci-watch     ∧ ¬PR ∃                                         → skip
@@ -176,6 +181,19 @@ should_skip(step, τ, Σ):
 ```
 
 `--from <step>` ⇒ force-mark all prior steps skipped (warn once).
+
+### BLOCK contract
+
+When skip-logic emits BLOCK at the `requirements` step, `/dev` must:
+
+1. Print this 3-line message to the user:
+   ```
+   step `requirements` not satisfied for issue #N
+     → run /req --issue N  (attach existing, create new, or log skip)
+     → or check existing REQs: ensure related.issues includes N
+   ```
+2. Halt — do NOT advance to `/spec`, `/plan`, or `/implement`.
+3. For CI observability: when `scan-state.sh` is invoked directly with `--check-tier F-lite` (or `F-full`) and `requirements=false`, it writes the same 3-line message to stderr and exits with status 2. This lets CI workflows fail fast without parsing stdout.
 
 ## Step 5 — Walk Steps + Find Next
 
@@ -247,7 +265,7 @@ audit ∧ S* ∈ critical → reasoning audit per [reasoning-audit.md](${CLAUDE_
 | triage | adv | `skill: "issue-triage", args: "N"` | frame |
 | frame | gate | `skill: "frame", args: "--issue N"` | analyze (F-full) ∨ spec (F-lite) |
 | analyze | adv | `skill: "analyze", args: "--issue N"` | requirements |
-| requirements | adv | `skill: "req", args: "--issue N"` | spec |
+| requirements | adv | `skill: "req", args: "--issue N"` (also callable standalone outside /dev — recommended response to BLOCK) | spec |
 | spec | gate | `skill: "spec", args: "--issue N"` | plan |
 | plan | gate | `skill: "plan", args: "--issue N"` | implement (auto-chain after approval) |
 | implement | adv | `skill: "implement", args: "--issue N"` | pr |

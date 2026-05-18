@@ -1,0 +1,13 @@
+---
+id: REQ-CASE2B-001
+title: "Synthetic requirement for fixture case-2b (block-sequence form)"
+status: approved
+related:
+  issues:
+    - 42
+---
+
+## Summary
+Fixture body — content not parsed by the gate. Uses YAML block-sequence
+form (`- 42` on its own line under `issues:`) to exercise the second
+grep path in `scan-state.sh`.
