@@ -230,6 +230,8 @@ at: {ISO 8601 timestamp}
 
 This marker is recognized by `/dev` Σ.requirements and unblocks the gate without a REQ. Use it when the issue genuinely has no requirements coverage need (infra cleanup, doc-only changes, etc.).
 
+**Body schema is advisory only.** The gate (`scan-state.sh`) checks file existence — the fields above (`issue`, `reason`, `by`, `at`) are a human-readable audit trail, not a stable parse contract. Future tooling that wants to consume the body should define its own schema rather than depending on this format.
+
 Append à `φ` (frame artifact) :
 
 ```markdown

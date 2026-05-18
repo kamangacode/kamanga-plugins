@@ -4,6 +4,14 @@
 N=$1
 SLUG=$2
 
+# Input validation: $N must be a positive integer.
+# Defends against path-traversal in .claude/req-skipped/${N}.md and regex
+# injection in the REQ artifact grep below.
+if ! [[ "$N" =~ ^[0-9]+$ ]]; then
+  echo "scan-state.sh: <N> must be a positive integer, got '$N'" >&2
+  exit 1
+fi
+
 REPO=$(gh repo view --json name --jq '.name' 2>/dev/null || echo "")
 
 # triage
@@ -50,22 +58,28 @@ else
 fi
 
 # requirements
+# Sets globals REQUIREMENTS (true|false) and REQUIREMENTS_REASON
+# (disabled | req-attached | frame-marker | spec-marker | req-skipped-file | not-satisfied)
+# so the caller can branch on the value without a second invocation (which would
+# re-run every file probe). One probe, two emit lines.
 compute_requirements() {
-  # Check if stack.yml exists and requirements.enabled is true
   local STACK=".claude/stack.yml"
   if [ ! -f "$STACK" ]; then
-    echo "requirements=true"
+    REQUIREMENTS=true
+    REQUIREMENTS_REASON=disabled
     return
   fi
 
-  # Parse requirements.enabled — look for 'enabled: true' within requirements stanza
+  # Parse requirements.enabled — accept case-insensitive YAML 1.1 truthy values
+  # (true / True / TRUE). Only the lowercase form is documented as canonical,
+  # but tolerating capital forms avoids silent misreads.
   local IN_REQ=0
   local ENABLED=false
   while IFS= read -r line; do
     if echo "$line" | grep -qE "^requirements:"; then
       IN_REQ=1
     elif [ "$IN_REQ" -eq 1 ]; then
-      if echo "$line" | grep -qE "^\s+enabled:\s+true"; then
+      if echo "$line" | grep -qE "^[[:space:]]+enabled:[[:space:]]+[Tt][Rr][Uu][Ee][[:space:]]*$"; then
         ENABLED=true
         break
       elif echo "$line" | grep -qE "^[a-zA-Z]"; then
@@ -76,7 +90,8 @@ compute_requirements() {
   done < "$STACK"
 
   if [ "$ENABLED" != "true" ]; then
-    echo "requirements=true"
+    REQUIREMENTS=true
+    REQUIREMENTS_REASON=disabled
     return
   fi
 
@@ -87,7 +102,7 @@ compute_requirements() {
     if echo "$line" | grep -qE "^requirements:"; then
       IN_REQ2=1
     elif [ "$IN_REQ2" -eq 1 ]; then
-      if echo "$line" | grep -qE "^\s+root:\s+\S"; then
+      if echo "$line" | grep -qE "^[[:space:]]+root:[[:space:]]+\S"; then
         REQ_ROOT=$(echo "$line" | sed 's/^[[:space:]]*root:[[:space:]]*//')
         break
       elif echo "$line" | grep -qE "^[a-zA-Z]"; then
@@ -96,45 +111,73 @@ compute_requirements() {
     fi
   done < "$STACK"
 
-  # Check 1: REQ artifact references this issue
+  # Check 1: REQ artifact references this issue.
+  # Two grep passes — YAML flow sequence (`issues: [42]`) AND block sequence
+  # (`issues:\n  - 42`). The block-sequence form is matched by finding any line
+  # of the form `^\s*-\s*N\s*$` in a REQ file that also contains an `issues:`
+  # line; the simpler heuristic below grep's for the digit on its own line.
   if [ -d "$REQ_ROOT" ]; then
-    if grep -rlE "issues:\s*\[[^]]*\b${N}\b" "$REQ_ROOT" >/dev/null 2>&1; then
-      echo "requirements=true"
+    # Flow sequence: issues: [42] or issues: [..., 42, ...]
+    if grep -rlE "issues:[[:space:]]*\[[^]]*\b${N}\b" "$REQ_ROOT" >/dev/null 2>&1; then
+      REQUIREMENTS=true
+      REQUIREMENTS_REASON=req-attached
       return
     fi
+    # Block sequence: scan files that contain BOTH an `issues:` key AND a
+    # `- N` list item on its own line. False-positive risk is low because the
+    # block-sequence item form must be exact (`- 42`, optionally with surrounding
+    # whitespace).
+    local f
+    while IFS= read -r f; do
+      if [ -n "$f" ] && grep -qE "^[[:space:]]*-[[:space:]]+${N}[[:space:]]*$" "$f"; then
+        REQUIREMENTS=true
+        REQUIREMENTS_REASON=req-attached
+        return
+      fi
+    done < <(grep -rlE "^[[:space:]]*issues:[[:space:]]*$" "$REQ_ROOT" 2>/dev/null)
   fi
 
   # Check 2: frame body contains "## Requirements skipped"
   if [ -n "$FRAME" ] && [ "$FRAME" != "false" ]; then
     if [ -f "artifacts/frames/${FRAME}" ] && grep -q "^## Requirements skipped" "artifacts/frames/${FRAME}" 2>/dev/null; then
-      echo "requirements=true"
+      REQUIREMENTS=true
+      REQUIREMENTS_REASON=frame-marker
       return
     fi
   fi
 
   # Check 3: spec frontmatter contains "requirements: skipped"
   if [ -n "$SPEC" ] && [ "$SPEC" != "false" ]; then
-    if [ -f "artifacts/specs/${SPEC}" ] && head -20 "artifacts/specs/${SPEC}" | grep -qE "^requirements:\s*skipped"; then
-      echo "requirements=true"
+    if [ -f "artifacts/specs/${SPEC}" ] && head -20 "artifacts/specs/${SPEC}" | grep -qE "^requirements:[[:space:]]*skipped"; then
+      REQUIREMENTS=true
+      REQUIREMENTS_REASON=spec-marker
       return
     fi
   fi
 
-  # Check 4: marker file exists
+  # Check 4: marker file exists.
+  # Body schema (issue/reason/by/at) is documented in skills/req/SKILL.md as a
+  # human-readable audit trail. The gate itself only checks file existence — the
+  # body is not parsed and is not contractually stable. Future readers wanting
+  # structured fields should define their own schema.
   if [ -f ".claude/req-skipped/${N}.md" ]; then
-    echo "requirements=true"
+    REQUIREMENTS=true
+    REQUIREMENTS_REASON=req-skipped-file
     return
   fi
 
-  echo "requirements=false"
+  REQUIREMENTS=false
+  REQUIREMENTS_REASON=not-satisfied
 }
 
 compute_requirements
+echo "requirements=$REQUIREMENTS"
+echo "requirements_reason=$REQUIREMENTS_REASON"
 
-# --check-tier gate
+# --check-tier gate: CI-observable BLOCK path.
+# Uses the already-computed REQUIREMENTS — does NOT re-invoke compute_requirements.
 if [ "$3" = "--check-tier" ] && { [ "$4" = "F-lite" ] || [ "$4" = "F-full" ]; }; then
-  REQ_VAL=$(compute_requirements)
-  if [ "$REQ_VAL" = "requirements=false" ]; then
+  if [ "$REQUIREMENTS" = "false" ]; then
     cat >&2 <<EOF
 step \`requirements\` not satisfied for issue #${N}
   → run /req --issue ${N}  (attach existing, create new, or log skip)
