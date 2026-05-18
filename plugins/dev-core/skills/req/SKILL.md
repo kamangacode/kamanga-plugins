@@ -29,6 +29,8 @@ Standalone-safe: callable without `/dev`. Invoked by `/dev` between `analyze` an
 /req --issue N      → run on issue N
 ```
 
+> **Callable outside `/dev`.** `/req --issue N` can be invoked directly when `/dev` blocks at the `requirements` step. The BLOCK message produced by `/dev` recommends this exact command.
+
 ## Pipeline
 
 | Step | ID | Required | Verifies via | Notes |
@@ -216,6 +218,17 @@ User a choisi `[Create new REQ stub]`.
 User a choisi `[Skip with reason]`.
 
 → → DP(A) text input "Reason for skip (e.g. 'pure refactor', 'docs only', 'experiment')" → capture `reason`.
+
+Write `.claude/req-skipped/{N}.md` with body:
+
+```
+issue: {N}
+reason: {free-text reason supplied by user}
+by: /req standalone
+at: {ISO 8601 timestamp}
+```
+
+This marker is recognized by `/dev` Σ.requirements and unblocks the gate without a REQ. Use it when the issue genuinely has no requirements coverage need (infra cleanup, doc-only changes, etc.).
 
 Append à `φ` (frame artifact) :
 

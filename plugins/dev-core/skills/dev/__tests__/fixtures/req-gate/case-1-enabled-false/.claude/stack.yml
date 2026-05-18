@@ -1,0 +1,3 @@
+requirements:
+  enabled: false
+  root: docs/requirements/

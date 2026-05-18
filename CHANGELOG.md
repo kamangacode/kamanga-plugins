@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 Entries are generated automatically by `/promote` and committed to staging before the promotion PR.
 
+## [Unreleased]
+
+### Breaking
+- dev-core: `/dev` `requirements` step now BLOCKS on F-lite / F-full when `stack.yml.requirements.enabled: true` and no REQ artifact references the issue (and no skip marker is set). Previously this case was silently skipped (#5). Opt-out: leave `requirements.enabled` unset or set it to `false` — same behavior as today. Opt-in skip per issue: run `/req --issue N` and pick "skip", which writes `.claude/req-skipped/{N}.md`.
+
 ## [v0.2.0] - 2026-03-09
 
 ### Added
