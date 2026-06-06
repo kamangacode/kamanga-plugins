@@ -189,12 +189,16 @@ export function resolvePriority(input: string): string | undefined {
 
 /** Resolve loose user input to a canonical size key, or undefined. */
 export function resolveSize(input: string): string | undefined {
-  // Direct match
-  if (CANONICAL_SIZES.has(input)) return input
-  // Case-insensitive match
   const upper = input.toUpperCase().replace(/[-\s]/g, '-')
+  // Project's actual SIZE_OPTIONS take precedence: preserves XS/M/L/XL when the
+  // project board carries the legacy 5-bucket schema (e.g. a legacy board).
+  if (Object.hasOwn(SIZE_OPTIONS, input)) return input
+  if (Object.hasOwn(SIZE_OPTIONS, upper)) return upper
+  // New tier-based schema (S / F-lite / F-full).
+  if (CANONICAL_SIZES.has(input)) return input
   if (CANONICAL_SIZES.has(upper)) return upper
-  // Aliases: XS → S, M → F-lite, L/XL → F-full
+  // Legacy to new schema aliasing: only fires when the project doesn't carry the
+  // legacy key as a real option (otherwise we'd have returned above).
   if (upper === 'XS') return 'S'
   if (upper === 'M') return 'F-lite'
   if (upper === 'L' || upper === 'XL') return 'F-full'
@@ -203,6 +207,32 @@ export function resolveSize(input: string): string | undefined {
   // F-full variations
   if (upper === 'FFULL' || upper === 'F_FULL' || upper === 'F-FULL') return 'F-full'
   return
+}
+
+/** Canonical size -> ordered legacy board keys to try when the canonical key
+ *  is absent from the project's SIZE_OPTIONS (legacy XS/S/M/L/XL boards).
+ *  F-full prefers the larger legacy bucket (XL before L).
+ *  Only canonical keys (S, F-lite, F-full) need entries here: legacy keys (XS/M/L/XL)
+ *  are resolved directly by resolveSize/the direct SIZE_OPTIONS lookup before this
+ *  table is consulted. */
+const SIZE_REVERSE_PRECEDENCE: Record<string, string[]> = {
+  'F-full': ['XL', 'L'],
+  'F-lite': ['M'],
+  S: ['S', 'XS'],
+}
+
+/** Resolve loose size input to the project board's option id and canonical key,
+ *  with reverse-alias fallback so canonical names (S/F-lite/F-full) work on legacy
+ *  XS/S/M/L/XL boards. Returns both optionId (for the board field) and canonical
+ *  (for log messages), so callers need not call resolveSize a second time. */
+export function getSizeOptionId(input: string): { optionId: string; canonical: string } | undefined {
+  const canonical = resolveSize(input)
+  if (!canonical) return undefined
+  if (Object.hasOwn(SIZE_OPTIONS, canonical)) return { optionId: SIZE_OPTIONS[canonical], canonical }
+  for (const key of SIZE_REVERSE_PRECEDENCE[canonical] ?? []) {
+    if (Object.hasOwn(SIZE_OPTIONS, key)) return { optionId: SIZE_OPTIONS[key], canonical }
+  }
+  return undefined
 }
 
 /** Resolve loose user input to a canonical lane key, or undefined. */

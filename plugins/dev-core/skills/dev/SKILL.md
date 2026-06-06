@@ -59,6 +59,7 @@ gh issue list --search "{text}" --json number,title,state --jq '.[:3]'
 
 | Step | Required artifacts |
 |------|-------------------|
+| recheck | issue (triage), no on-disk prereq; always runs from session state |
 | frame | issue (triage) |
 | analyze | `artifacts/frames/{N}-{slug}-frame.mdx` or `artifacts/frames/{slug}-frame.mdx` (approved) |
 | spec | `artifacts/frames/{slug}-frame.mdx` or `artifacts/analyses/{N}-{slug}-analysis.mdx` |
@@ -79,6 +80,7 @@ bash ${CLAUDE_SKILL_DIR}/scan-state.sh {N} {slug}
 
 Σ = {
   triage:        issue ∃,
+  recheck:       null,       # Σ_s only, runs every session (no on-disk state)
   frame:         φ ∃ ∧ φ.status == 'approved',
   analyze:       analysis artifact ∃,
   requirements:  ¬stack.yml.requirements.enabled
@@ -118,7 +120,7 @@ Claude Code task list drives in-session progress for the dev pipeline. Treat it 
 
 Ordered step list:
 ```
-triage → frame → analyze → requirements → spec → plan → implement → pr →
+triage → recheck → frame → analyze → requirements → spec → plan → implement → pr →
 ci-watch → validate → review → fix → promote → cleanup
 ```
 
@@ -157,7 +159,7 @@ Wire dependencies sequentially — ∀ i > 0: `TaskUpdate(task[i].id, addBlocked
 → Next: {S*} — {one-line description}
 ```
 
-Bar: `██`=done/skipped, `░░`=pending. Phases: Frame:{triage,frame} | Shape:{analyze,requirements,spec} | Build:{plan,implement,pr} | Verify:{ci-watch,validate,review,fix} | Ship:{promote,cleanup}
+Bar: `██`=done/skipped, `░░`=pending. Phases: Frame:{triage,recheck,frame} | Shape:{analyze,requirements,spec} | Build:{plan,implement,pr} | Verify:{ci-watch,validate,review,fix} | Ship:{promote,cleanup}
 
 Status: `✓ {name}` (done) | `skipped` | `pending` | `→ next`.
 
@@ -166,6 +168,7 @@ Status: `✓ {name}` (done) | `skipped` | `pending` | `→ next`.
 ```
 should_skip(step, τ, Σ):
   triage       ∧ Σ.triage                                    → skip (already done)
+  recheck                                                     → false (never skipped, explicit decision per frame #181)
   frame        ∧ τ == S                                       → skip
   analyze      ∧ τ ∈ {S, F-lite}                             → skip (frame sufficient)
   requirements ∧ τ == S                                       → skip
@@ -200,6 +203,7 @@ When skip-logic emits BLOCK at the `requirements` step, `/dev` must:
 ```
 STEPS = [
   (Frame,  triage,       issue-triage),
+  (Frame,  recheck,      recheck),
   (Frame,  frame,        frame),
   (Shape,  analyze,      analyze),
   (Shape,  requirements, req),
@@ -262,12 +266,13 @@ audit ∧ S* ∈ critical → reasoning audit per [reasoning-audit.md](${CLAUDE_
 
 | Step | Class | Skill invocation | On success → |
 |------|-------|------------------|--------------|
-| triage | adv | `skill: "issue-triage", args: "N"` | frame |
+| triage | adv | `skill: "issue-triage", args: "N"` | recheck |
+| recheck | adv | `skill: "recheck", args: "--from-dev #N"` | frame |
 | frame | gate | `skill: "frame", args: "--issue N"` | analyze (F-full) ∨ spec (F-lite) |
 | analyze | adv | `skill: "analyze", args: "--issue N"` | requirements |
 | requirements | adv | `skill: "req", args: "--issue N"` (also callable standalone outside /dev — recommended response to BLOCK) | spec |
 | spec | gate | `skill: "spec", args: "--issue N"` | plan |
-| plan | gate | `skill: "plan", args: "--issue N"` | implement (auto-chain after approval) |
+| plan | gate | `skill: "plan", args: "--issue N"` | implement, via Step 8b compact pause (F-lite/F-full; ¬auto-chain) |
 | implement | adv | `skill: "implement", args: "--issue N"` | pr |
 | pr | adv | `skill: "pr"` (auto-detects branch + issue) | ci-watch |
 | ci-watch | adv | `skill: "ci-watch", args: "--pr {PR#}"` | validate |
@@ -288,7 +293,8 @@ Skill returns → **IMMEDIATELY in the same turn, silently:**
 1. `TaskUpdate(task_id_map[S*], status: "completed")`
 2. `Σ_s[step] = true`
 3. Goto Step 1 (re-scan Σ)
-4. Execute Step 7 for new S*
+4. **Compact pause** (Step 8b): completed step == plan ∧ τ ∈ {F-lite, F-full} ∧ new S* == implement → present pause, **STOP this turn** (¬Step 7).
+5. Execute Step 7 for new S*
 
 **¬write** "Step X complete" message between skill return and re-scan.
 **¬write** "Moving to Y" message between re-scan and Step 7.
@@ -298,16 +304,38 @@ Skill returns → **IMMEDIATELY in the same turn, silently:**
 Skill fails/aborts → leave task `in_progress` → present recovery decision via protocol (Pattern A): **Retry** | **Skip** | **Abort**.
 Σ_s ensures within-session advancement for artifact-less steps (validate, review, fix).
 Session restart → Σ_s = ∅ → artifact-less steps re-run. 2b.1 will find the existing tasks (status possibly `completed` from last run) and skip re-seeding.
-gate → re-scan detects updated artifact → Step 6 gate → Step 7 immediately (¬second prompt).
+gate → re-scan detects updated artifact → Step 6 gate → Step 7 immediately (¬second prompt). **Exception:** completed gate == plan ∧ τ ∈ {F-lite, F-full} → Step 8b compact pause (¬Step 7 this turn).
 adv → re-scan → Step 7 immediately.
+
+## Step 8b — Compact Pause (plan→implement, F-lite/F-full)
+
+**Trigger:** in Step 8, the step that just completed == `plan` ∧ τ ∈ {F-lite, F-full} ∧ new S* == `implement`.
+τ=S never reaches here: `plan` is skipped, so the pipeline goes straight to `implement` with no pause.
+
+**Why:** `/plan` consumed heavy context (spec read, scope glob/grep, micro-task generation, mermaid). `/implement` spawns fresh agents whose context is injected from the task list + plan artifact, so the planning conversation is dead weight. Tasks persist (task list + plan artifact `## Task IDs`); `/implement` Step 1b re-attaches after a context reset. `/compact` = soft restart, safe.
+
+**Behavior:** do **NOT** auto-chain to `/implement`. Print the recommendation block below and **STOP this turn** (Claude cannot invoke `/compact`, it is user-typed):
+
+```
+✓ Plan approved ({τ}): {n} tasks seeded + committed.
+  Tasks persist (task list + plan artifact ## Task IDs) → safe to compact.
+
+  Recommended before building:
+    1. /compact          clear planning context
+    2. /dev #{N}         resume → re-attaches tasks → ≡ /implement #{N}
+
+  Skip compact? → /implement --issue {N} directly.
+```
+
+**Re-fire guard:** the pause is keyed to *plan having just run this turn*, not to *implement being next*. On the resume turn (`/dev #{N}` after `/compact`), `/dev` did not execute `plan` (Σ.plan already true on disk) → Step 8b does not apply → Step 7 invokes `/implement` directly, no second prompt.
 
 ## Phases + Gate Summary
 
 | Phase | Steps | Gate after |
 |-------|-------|-----------|
-| Frame | triage → frame | frame approval (status: approved) |
+| Frame | triage → recheck → frame | frame approval (status: approved) |
 | Shape | analyze → spec | spec approval |
-| Build | plan → implement → pr | plan approval (then auto-chains implement → pr) |
+| Build | plan → implement → pr | plan approval → compact pause (F-lite/F-full, Step 8b) before implement → pr |
 | Verify | ci-watch → validate → review → fix | post-review: fix/merge/stop. Merge = feature→staging (via /code-review Phase 8). |
 | Ship | promote → cleanup | promote always skipped. cleanup runs if worktree/branches stale. |
 
@@ -316,6 +344,7 @@ adv → re-scan → Step 7 immediately.
 | Step | S | F-lite | F-full |
 |------|---|--------|--------|
 | triage | run | run | run |
+| recheck | run | run | run |
 | frame | skip | run + gate | run + gate |
 | analyze | skip | skip | run |
 | spec | skip | run + gate | run + gate |
