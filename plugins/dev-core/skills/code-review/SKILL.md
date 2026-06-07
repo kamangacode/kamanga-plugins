@@ -120,7 +120,18 @@ digests = emit_all_digests(chunks)            # list[BoundaryDigest]
 
 Skip rules: architect → |Δ| ≤ 5 ∧ ¬arch keywords | product-lead → spec ∄ | tester → Δ ⊂ {config, docs, infra}
 
+Dispatch table-driven et obligatoire : spawn chaque agent dont la condition tient.
+¬sauter un agent pour économiser tokens/temps (4.8 sous-utilise les sous-agents par défaut).
+
 **Subdomain split (multi-chunk):** For each chunk `c_i`, apply the dispatch table against `c_i.files` only (not full Δ). Default: 1 agent per domain per chunk.
+
+### Reporting bar (toutes lanes)
+
+Remonte TOUTE finding, y compris basse confiance et basse sévérité. ¬auto-filtrer
+par importance au stade finding : le merge + verdict (Phase 4) classe et filtre.
+L'objectif au stade agent est la couverture. Chaque finding porte sa Confidence +
+catégorie → l'orchestrateur range. Une finding incertaine remontée puis écartée en
+Phase 4 vaut mieux qu'un bug silencieusement laissé de côté.
 
 ### Security-auditor scoping
 
@@ -151,7 +162,7 @@ For each chunk `c_i`, spawn the applicable domain agents in parallel:
 Task(
   subagent_type: "dev-core:{agent}",
   description: "{agent} review — chunk {i}/{N} — {PR#|branch}",
-  prompt: "Code review task. Focus: {focus}. Output Conventional Comments findings only. ¬TaskCreate.\n\nYou are reviewing chunk {i} of {N}. Review ONLY the files in this chunk.\n\nFormat per finding:\n<label>: <description>\n  <file>:<line>\n  -- {agent}\n  Root cause: <why>\n  Class: [<canonical-class>, ...] [candidate/<slug>?]  ← 0–N canonical from review-classes.yml + 0–1 candidate; omit field if no class applies\n  Raw callsites: [{file: <path>, line: <n>}, ...]  ← all locations of this anti-pattern; required when Class is set; never empty\n  Solutions:\n    1. <primary> (recommended)\n    2. <alternative>\n  Confidence: N%\n\nCanonical classes (use slug only): test-tautology, generator-drift, parallel-path-drift, bash-arithmetic-trap, bash-error-suppression, target-axis-trap, shell-injection, sql-injection, missing-error-handling, missing-input-validation, secret-leak, bare-except, path-traversal, unbounded-loop. Free-text labels not in this list or candidate/* namespace are invalid. Candidate slugs must match ^candidate/[a-z][a-z0-9-]{1,48}$. Subsumption: bare-except subsumes missing-error-handling — when both apply, tag bare-except only. parallel-path-drift and target-axis-trap are siblings (¬overlap) — parallel-path-drift for security hardening missing on a sibling entry point, target-axis-trap for architectural concern duplication across the non-primary axis (concern copy-pasted in ≥3 sibling dirs); prefer the matching one, do not double-tag.\n\n---CHUNK DIFF (chunk {i})---\n{c_i.hunk_text for all files in chunk}\n\n---CHUNK FILES---\n{contents of files in c_i}\n\n---BOUNDARY DIGESTS (other chunks)---\n{format_digest_for_agent(d) for d in digests if d.chunk_index != i}\n\n---SPEC---\n{spec contents if ∃, else omit section}"
+  prompt: "Code review task. Focus: {focus}. Output Conventional Comments findings only. ¬TaskCreate. Remonte TOUTE finding, y compris basse confiance et basse sévérité : ¬auto-filtrer par importance au stade finding, le merge + verdict (Phase 4) classe et filtre. Coverage = objectif; chaque finding porte sa Confidence.\n\nYou are reviewing chunk {i} of {N}. Review ONLY the files in this chunk.\n\nFormat per finding:\n<label>: <description>\n  <file>:<line>\n  -- {agent}\n  Root cause: <why>\n  Class: [<canonical-class>, ...] [candidate/<slug>?]  ← 0–N canonical from review-classes.yml + 0–1 candidate; omit field if no class applies\n  Raw callsites: [{file: <path>, line: <n>}, ...]  ← all locations of this anti-pattern; required when Class is set; never empty\n  Solutions:\n    1. <primary> (recommended)\n    2. <alternative>\n  Confidence: N%\n\nCanonical classes (use slug only): test-tautology, generator-drift, parallel-path-drift, bash-arithmetic-trap, bash-error-suppression, target-axis-trap, shell-injection, sql-injection, missing-error-handling, missing-input-validation, secret-leak, bare-except, path-traversal, unbounded-loop. Free-text labels not in this list or candidate/* namespace are invalid. Candidate slugs must match ^candidate/[a-z][a-z0-9-]{1,48}$. Subsumption: bare-except subsumes missing-error-handling — when both apply, tag bare-except only. parallel-path-drift and target-axis-trap are siblings (¬overlap) — parallel-path-drift for security hardening missing on a sibling entry point, target-axis-trap for architectural concern duplication across the non-primary axis (concern copy-pasted in ≥3 sibling dirs); prefer the matching one, do not double-tag.\n\n---CHUNK DIFF (chunk {i})---\n{c_i.hunk_text for all files in chunk}\n\n---CHUNK FILES---\n{contents of files in c_i}\n\n---BOUNDARY DIGESTS (other chunks)---\n{format_digest_for_agent(d) for d in digests if d.chunk_index != i}\n\n---SPEC---\n{spec contents if ∃, else omit section}"
 )
 ```
 
@@ -336,6 +347,7 @@ Q:
 3. ¬fix code — findings only. Fixing = `/fix` skill
 4. ∃ PR → must post comment (Phase 6)
 5. Human decides at Phase 8 — ¬proceed without Q
+6. ¬insérer de question sur des choix mineurs de présentation (ordre, regroupement, formulation) : présenter les findings et la décision Phase 8 directement. Les seuls gates humains sont l'ACK secret (Phase 1.5) et la décision Phase 8.
 
 ## Chain Position
 

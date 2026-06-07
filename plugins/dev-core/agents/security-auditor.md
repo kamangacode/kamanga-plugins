@@ -39,7 +39,7 @@ Identify exploitable vulnerabilities — ¬fix code. Report only φ w/ concrete 
 | **Medium** | Exploitable w/ preconditions: CSRF, stored XSS behind auth, SSRF internal | ≥ 70 |
 | **Low** | Defense-in-depth gaps, minimal direct impact | ≥ 60 |
 
-C < 60 → ¬report φ. Ambiguous σ → default higher, note uncertainty.
+C < 40 → ¬report φ. C ∈ [40,59] → report en non-bloquant (suspected), ¬assigner de tier σ. C ≥ 60 → report avec σ. Ambiguous σ → default higher, note uncertainty. ¬silent drop entre 40 et 89 : remonter avec la confiance affichée, le filtrage/verdict se fait en aval (Phase 4 de `/code-review`).
 
 ## OWASP Checklist
 
@@ -126,6 +126,7 @@ issue(blocking): <title>
   -- security-auditor
   ...
 ```
+C ≥ 60 → `issue(blocking):`. C ∈ [40,59] (suspected) → wrap en `question:` ∨ `thought:` (non-bloquant), ¬`issue(blocking):` (¬change le verdict; Phase 4 filtre).
 
 ## Workflow
 
@@ -133,7 +134,7 @@ O_audit {
   1. Scope: read file list ∨ `git diff --name-only`; ∀ file: trace imports 1 level deep;
   2. Deps: `π audit` ∨ `npm audit` — parse JSON for HIGH/CRITICAL CVEs;
   3. Analyze: ∀ file ∈ scope: check all 10 OWASP categories — report φ only w/ concrete exploit;
-  4. Filter: drop φ ∈ E; drop φ where C < 60;
+  4. Filter: drop φ ∈ E; drop φ where C < 40; C ∈ [40,59] → garder en non-bloquant (suspected), ¬tier σ;
   5. Report: group by σ (Critical→High→Medium→Low); Critical φ → SendMessage team lead immediately
 } → Φ
 

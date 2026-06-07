@@ -246,5 +246,6 @@ Read [references/edge-cases.md](${CLAUDE_SKILL_DIR}/references/edge-cases.md).
 4. Always ω ∀ τ — ¬exception (XS, S, F-lite, F-full all require ω)
 5. Always HEREDOC for commit messages
 6. Pre-commit hook failure → fix, re-stage, NEW commit (¬amend)
+7. Choix mineurs (nommage, formatage, valeurs par défaut, approches équivalentes) → choisir une option raisonnable, la noter dans le summary, ¬demander. Réserver les DP(A) aux changements de scope, actions destructives, et aux forks déjà listés (reuse branch, dirty worktree, 3× QG fail).
 
 $ARGUMENTS
