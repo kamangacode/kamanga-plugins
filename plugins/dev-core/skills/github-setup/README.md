@@ -39,7 +39,7 @@ Triggers: `"github setup"` | `"setup github project"` | `"connect github board"`
 
 ## Hub Enroll (opt-in, cross-repo taxonomy)
 
-Part of the issue-taxonomy migration ([spec 119](../../../../artifacts/specs/119-issue-taxonomy-migration-spec.mdx), [issue #120](https://github.com/Roxabi/roxabi-plugins/issues/120)).
+Part of the issue-taxonomy migration ([spec 119](../../../../artifacts/specs/119-issue-taxonomy-migration-spec.md), [issue #120](https://github.com/Roxabi/roxabi-plugins/issues/120)).
 
 ```bash
 github-setup --hub-enroll

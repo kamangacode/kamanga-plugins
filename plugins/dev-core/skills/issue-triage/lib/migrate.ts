@@ -1,6 +1,6 @@
 /**
  * migrate.ts — taxonomy migration subcommands: audit-schema, backfill, rewrite-titles, revert.
- * See artifacts/specs/121-dual-write-migration-spec.mdx.
+ * See artifacts/specs/121-dual-write-migration-spec.md.
  */
 
 import { execFileSync } from 'node:child_process'

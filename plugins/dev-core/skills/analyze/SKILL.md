@@ -11,11 +11,11 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, EnterWorktree, ExitWorktree,
 ## Success
 
 I := α written ∧ committed ∧ shapes ∃
-V := `git log --oneline -1 | grep analysis` ∧ `ls artifacts/analyses/{N}-*.mdx`
+V := `git log --oneline -1 | grep analysis` ∧ `ls artifacts/analyses/{N}-*.md`
 
 Let:
-  α := artifacts/analyses/{N}-{slug}-analysis.mdx
-  φ := artifacts/frames/{slug}-frame.mdx
+  α := artifacts/analyses/{N}-{slug}-analysis.md
+  φ := artifacts/frames/{slug}-frame.md
   ρ := expert reviewer set
   Ω := `skill: "interview"`
   Q := decision presentation (Pattern A — read `${CLAUDE_PLUGIN_ROOT}/../shared/references/decision-presentation.md`)
@@ -57,7 +57,7 @@ Parse args → locate φ.
 # Find frame by issue number in frontmatter or filename
 grep -rl "issue: N" artifacts/frames/ 2>/dev/null | head -1
 # Fallback: glob by any slug
-ls artifacts/frames/*.mdx 2>/dev/null
+ls artifacts/frames/*.md 2>/dev/null
 ```
 
 `--frame path` → read directly.
@@ -188,13 +188,13 @@ Incorporate feedback → revise α → note unresolved concerns.
 
 ## Step 4 — User Approval
 
-Open α: `code artifacts/analyses/{N}-{slug}-analysis.mdx`.
+Open α: `code artifacts/analyses/{N}-{slug}-analysis.md`.
 
 Present summary: shapes found, trade-offs, recommended shape, unresolved concerns.
 
 → DP(A) **Approve** → update issue status → done | **Revise** → collect feedback → revise α → loop from Step 3.
 
-On approval → commit: `git add artifacts/analyses/{N}-{slug}-analysis.mdx` + commit per CLAUDE.md Rule 5.
+On approval → commit: `git add artifacts/analyses/{N}-{slug}-analysis.md` + commit per CLAUDE.md Rule 5.
 
 ```bash
 bun ${CLAUDE_PLUGIN_ROOT}/skills/issue-triage/triage.ts set <N> --status Analysis
@@ -216,7 +216,7 @@ Inform: "Analysis complete. Run `/spec --issue <N>` to generate the solution spe
 ## Chain Position
 
 - **Phase:** Shape
-- **Predecessor:** `/frame` (artifact: `artifacts/frames/{N}-{slug}-frame.mdx`)
+- **Predecessor:** `/frame` (artifact: `artifacts/frames/{N}-{slug}-frame.md`)
 - **Successor:** `/spec`
 - **Class:** adv (continuous flow, no gate — user approves α inline in Step 4, not a pipeline gate)
 

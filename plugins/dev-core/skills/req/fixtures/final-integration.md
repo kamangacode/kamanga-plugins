@@ -24,7 +24,7 @@ Validates all 12 spec success criteria via end-to-end walk of `/dev #42` (F-lite
 8. `/spec --issue 42` :
    - Step 1c — grep returns `REQ-BOOKING-003.mdx` → `attached_reqs = [REQ-BOOKING-003]`.
    - Step 2 — frontmatter pre-fill : `req: REQ-BOOKING-003`.
-   - Spec written : `artifacts/specs/42-coach-cancel-booking-spec.mdx` with `req:` field.
+   - Spec written : `artifacts/specs/42-coach-cancel-booking-spec.md` with `req:` field.
 9. `/plan` consumes spec → `pnpm requirements:matrix` would show issue #42 → REQ-BOOKING-003 mapping.
 
 ## Success criteria validation
@@ -48,4 +48,4 @@ Validates all 12 spec success criteria via end-to-end walk of `/dev #42` (F-lite
 
 **Final integration : 12/12 PASS** ✓
 
-All 12 success criteria from `artifacts/specs/1-dev-requirements-substep-spec.mdx` are validated by walking the implementation against the fixture suite.
+All 12 success criteria from `artifacts/specs/1-dev-requirements-substep-spec.md` are validated by walking the implementation against the fixture suite.

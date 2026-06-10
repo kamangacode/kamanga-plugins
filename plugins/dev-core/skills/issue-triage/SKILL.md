@@ -87,7 +87,7 @@ Create GitHub issues, assign Size/Priority/Status, manage blockedBy dependencies
 
 ### `migrate` — Schema validation and data migration
 
-> Operational context (7-day soak, 7 enrolled repos, serial-per-repo rollout, `flagged.txt` review gate): `artifacts/specs/121-dual-write-migration-spec.mdx`
+> Operational context (7-day soak, 7 enrolled repos, serial-per-repo rollout, `flagged.txt` review gate): `artifacts/specs/121-dual-write-migration-spec.md`
 
 #### `migrate audit-schema`
 
@@ -170,7 +170,7 @@ gh issue edit <number> --body "$BODY
 κ is advisory. Human judgment overrides. → DP(B)if score ≠ intuition.
 
 See [Tier Classification Reference](${CLAUDE_PLUGIN_ROOT}/skills/shared/references/tier-classification.md) for full rules.
-Reference: `artifacts/analyses/280-token-consumption.mdx` for scoring examples.
+Reference: `artifacts/analyses/280-token-consumption.md` for scoring examples.
 
 ## Status Values
 
