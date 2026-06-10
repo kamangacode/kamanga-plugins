@@ -108,7 +108,7 @@ $ /req --issue 99
 Reason: cleanup chore, no functional requirement
 ```
 
-→ Appends to `artifacts/frames/99-*-frame.mdx` :
+→ Appends to `artifacts/frames/99-*-frame.md` :
 
 ```markdown
 ## Requirements skipped

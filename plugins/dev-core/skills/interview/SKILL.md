@@ -48,9 +48,9 @@ Glob A, S — match topic by issue#, keywords, or slug.
 
 | τ | Purpose | Output Path |
 |---|---------|-------------|
-| β | Divergent exploration, early-stage ideas | `artifacts/analyses/{slug}.mdx` |
-| α | Structured investigation of topic/problem | `artifacts/analyses/{slug}.mdx` |
-| σ | Technical specification for implementation | `artifacts/specs/{issue}-{slug}.mdx` |
+| β | Divergent exploration, early-stage ideas | `artifacts/analyses/{slug}.md` |
+| α | Structured investigation of topic/problem | `artifacts/analyses/{slug}.md` |
+| σ | Technical specification for implementation | `artifacts/specs/{issue}-{slug}.md` |
 
 ## Step 3 — Structured Interview
 
@@ -117,8 +117,8 @@ Depth by τ: β = Phase 1 + divergent (lighter) | α = Phases 1–3 thorough | �
 Write using appropriate template. Rules:
 - `.mdx` extension with YAML frontmatter (`title`, `description`).
 - Kebab-case slugs.
-- σ prefix: `artifacts/specs/{issue}-{slug}-spec.mdx`
-- α/β: `artifacts/analyses/{slug}-analysis.mdx` (prefix with issue# if ∃).
+- σ prefix: `artifacts/specs/{issue}-{slug}-spec.md`
+- α/β: `artifacts/analyses/{slug}-analysis.md` (prefix with issue# if ∃).
 - β adds `type: brainstorm` to frontmatter.
 - Escape `<` as `&lt;` in MDX content.
 

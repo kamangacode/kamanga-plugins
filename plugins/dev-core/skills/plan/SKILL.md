@@ -11,11 +11,11 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, EnterWorktree, ExitWorktree,
 ## Success
 
 I := π written ∧ ## Task IDs section ∃
-V := `ls artifacts/plans/{N}-*.mdx` ∧ `grep "## Task IDs" artifacts/plans/{N}-*.mdx`
+V := `ls artifacts/plans/{N}-*.md` ∧ `grep "## Task IDs" artifacts/plans/{N}-*.md`
 
 Let:
   σ := spec artifact
-  π := plan artifact at `artifacts/plans/{issue}-{slug}.mdx`
+  π := plan artifact at `artifacts/plans/{issue}-{slug}.md`
   τ := tier ∈ {S, F-lite, F-full}
 
 Spec → micro-tasks → agent assignments → plan artifact.
@@ -42,13 +42,13 @@ Spec → micro-tasks → agent assignments → plan artifact.
 ## Pre-flight
 
 Success: π written ∧ ## Task IDs section ∃
-Evidence: `grep "## Task IDs" artifacts/plans/{N}-*.mdx`
+Evidence: `grep "## Task IDs" artifacts/plans/{N}-*.md`
 Steps: locate-spec → plan → refs → micro-tasks → write → approve
 ¬clear → STOP + ask: "Do you have a spec to plan from?"
 
 ## Step 1 — Locate Spec
 
-`--issue N` → `ls artifacts/specs/N-*.mdx` → read full → extract title, criteria, files.
+`--issue N` → `ls artifacts/specs/N-*.md` → read full → extract title, criteria, files.
 `--spec <path>` → read directly.
 ¬found → suggest `/spec` or `/dev`. **Stop.**
 
@@ -149,7 +149,7 @@ See [references/micro-task-example.mdx](${CLAUDE_SKILL_DIR}/references/micro-tas
 
 ## Step 5 — Write Plan Artifact
 
-Write to `artifacts/plans/{N}-{slug}-plan.mdx`. Create `artifacts/plans/` dir if needed.
+Write to `artifacts/plans/{N}-{slug}-plan.md`. Create `artifacts/plans/` dir if needed.
 
 Use [references/plan-template.mdx](${CLAUDE_SKILL_DIR}/references/plan-template.mdx). See [references/micro-task-example.mdx](${CLAUDE_SKILL_DIR}/references/micro-task-example.mdx) for task formatting.
 
@@ -157,7 +157,7 @@ Use [references/plan-template.mdx](${CLAUDE_SKILL_DIR}/references/plan-template.
 ---
 title: "Plan: {title}"
 issue: {N}
-spec: artifacts/specs/{N}-{slug}-spec.mdx
+spec: artifacts/specs/{N}-{slug}-spec.md
 complexity: {score}/10
 tier: {τ}
 generated: {ISO}
@@ -320,7 +320,7 @@ This lets `/implement` re-attach to tasks after a session restart (TaskList woul
 
 ### Step 6c — Commit
 
-`git add artifacts/plans/{N}-{slug}-plan.mdx` + commit per CLAUDE.md Rule 5.
+`git add artifacts/plans/{N}-{slug}-plan.md` + commit per CLAUDE.md Rule 5.
 
 → Then **Exit** — approval lands on a compact pause (recommend `/compact` before `/implement`), ¬auto-chain. See Exit.
 
@@ -338,7 +338,7 @@ Read [references/edge-cases.md](${CLAUDE_SKILL_DIR}/references/edge-cases.md).
 ## Chain Position
 
 - **Phase:** Build
-- **Predecessor:** `/spec` (artifact: `artifacts/specs/{N}-{slug}-spec.mdx`)
+- **Predecessor:** `/spec` (artifact: `artifacts/specs/{N}-{slug}-spec.md`)
 - **Successor:** `/implement` (via compact pause — `/dev` Step 8b; ¬auto-chain for F-lite/F-full)
 - **Class:** gate (user approval of plan artifact required) → **pause** (compact recommendation before `/implement`)
 

@@ -54,7 +54,7 @@ Result: **PASS** — stub valid + traceable to issue #42.
 Walk Step 8c on issue #43 (chore) with user choice `[Skip with reason]` :
 
 - AskUserQuestion text input → user types `"cleanup chore, no functional requirement"`.
-- φ artifact path : `artifacts/frames/43-stale-drafts-cleanup-frame.mdx` (from frame skill convention).
+- φ artifact path : `artifacts/frames/43-stale-drafts-cleanup-frame.md` (from frame skill convention).
 - Append section :
   ```markdown
 

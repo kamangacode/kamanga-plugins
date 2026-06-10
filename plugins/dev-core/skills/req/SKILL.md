@@ -11,13 +11,13 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch
 ## Success
 
 I := REQ-X.mdx mutated ∨ stub created ∨ skip logged in φ
-V := (attach) `grep -l "related.issues:.*\bN\b" {root}/**/*.mdx` ∋ ≥1 file ∨ (create) `test -f {root}/{kind}/{domain}/REQ-{DOM}-{NNN}.mdx` ∨ (skip) `grep "Requirements skipped" artifacts/frames/{N}-*.mdx`
+V := (attach) `grep -l "related.issues:.*\bN\b" {root}/**/*.mdx` ∋ ≥1 file ∨ (create) `test -f {root}/{kind}/{domain}/REQ-{DOM}-{NNN}.mdx` ∨ (skip) `grep "Requirements skipped" artifacts/frames/{N}-*.md`
 
 Let:
   N := issue number
   R := docs/requirements/ (∨ `stack.yml.requirements.root`)
   τ := tier (S → skip)
-  φ := artifacts/frames/{N}-{slug}-frame.mdx
+  φ := artifacts/frames/{N}-{slug}-frame.md
   AQ := Present decision via protocol: read `${CLAUDE_PLUGIN_ROOT}/../shared/references/decision-presentation.md`
 
 issue → REQ identified ∨ created ∨ skip-justified. Idempotent re-run.
@@ -292,7 +292,7 @@ requirements:
 ## Chain Position
 
 - **Phase:** Shape
-- **Predecessor:** `/analyze` (artifact: `artifacts/analyses/{N}-*.mdx`) ∨ `/frame` (Tier F-lite)
+- **Predecessor:** `/analyze` (artifact: `artifacts/analyses/{N}-*.md`) ∨ `/frame` (Tier F-lite)
 - **Successor:** `/spec` (consomme `req:` frontmatter via grep `related.issues`)
 - **Class:** gate (action persistée) — toujours interactif via `AskUserQuestion`
 

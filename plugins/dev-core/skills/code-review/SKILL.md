@@ -73,7 +73,7 @@ git diff ${BASE}...HEAD | grep -iE '(password|passwd|secret|api[_-]?key|auth[_-]
 ## Phase 2 — Spec Compliance
 
 1. issue_num ← `git branch --show-current | grep -oP '\d+' | head -1`
-2. spec ← `ls artifacts/specs/<issue_num>-*.mdx 2>/dev/null`
+2. spec ← `ls artifacts/specs/<issue_num>-*.md 2>/dev/null`
 3. spec ∃ → ∀ criterion: met → ∅ | ¬met → `issue(blocking):` | ∀ met → `praise:`
 4. spec ∄ → skip
 
