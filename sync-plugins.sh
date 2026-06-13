@@ -1,22 +1,27 @@
 #!/usr/bin/env bash
-# sync-plugins.sh — Push, pull, and sync Roxabi plugins across machines + caches
+# sync-plugins.sh - Push, pull, and sync plugins into local caches
 #
 # Usage:
-#   ./sync-plugins.sh              # sync everything (local + remote)
-#   ./sync-plugins.sh --local      # sync local cache only
-#   ./sync-plugins.sh --remote     # sync Machine 1 cache only
+#   ./sync-plugins.sh              # sync local caches (default)
+#   ./sync-plugins.sh --local      # sync local caches only (same as default)
+#   ./sync-plugins.sh --remote     # sync a remote host's cache only (opt-in)
+#
+# Remote sync is opt-in and has no hardcoded host. To enable it, export
+# PLUGIN_SYNC_REMOTE_HOST=user@host before running with --remote.
 #
 # Flow:
 #   1. Push staging to origin (for the repo where script runs)
 #   2. Discover brother marketplaces (git repos w/ staging branch)
 #   3. Pull staging into each local marketplace
 #   4. Rsync plugins/skills → all local cache dirs
-#   5. Repeat on Machine 1 if --remote
+#   5. Repeat on the remote host only if --remote AND PLUGIN_SYNC_REMOTE_HOST is set
 
 set -euo pipefail
 
 # Config
-REMOTE_HOST="mickael@192.168.1.16"
+# Optional remote host for multi-machine sync. Empty by default (local-only).
+# Set PLUGIN_SYNC_REMOTE_HOST=user@host to enable remote sync via --remote.
+REMOTE_HOST="${PLUGIN_SYNC_REMOTE_HOST:-}"
 MARKETPLACES_DIR="$HOME/.claude/plugins/marketplaces"
 CACHE_BASE="$HOME/.claude/plugins/cache"
 SCRIPT_REPO="$(cd "$(dirname "$0")" && pwd)"
@@ -29,22 +34,22 @@ NC='\033[0m'
 step() { echo -e "${GREEN}→ $1${NC}"; }
 warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
 
-# Parse flags
+# Parse flags - local-only by default; remote sync is opt-in via --remote
 DO_LOCAL=true
-DO_REMOTE=true
-if [[ "${1:-}" == "--local" ]]; then DO_REMOTE=false; fi
-if [[ "${1:-}" == "--remote" ]]; then DO_LOCAL=false; fi
+DO_REMOTE=false
+if [[ "${1:-}" == "--local" ]]; then DO_LOCAL=true; DO_REMOTE=false; fi
+if [[ "${1:-}" == "--remote" ]]; then DO_LOCAL=false; DO_REMOTE=true; fi
 
 # Step 1: Push current branch to origin (only for the repo containing this script)
 CURRENT_BRANCH=$(git -C "$SCRIPT_REPO" rev-parse --abbrev-ref HEAD)
 if [[ "$CURRENT_BRANCH" != "staging" ]]; then
-    warn "Not on staging (on '$CURRENT_BRANCH') — aborting push to prevent pushing wrong branch"
+    warn "Not on staging (on '$CURRENT_BRANCH') - aborting push to prevent pushing wrong branch"
     exit 1
 fi
 step "Pushing staging to origin..."
 git -C "$SCRIPT_REPO" push origin staging
 
-# discover_roxabi_marketplaces — find all marketplaces with staging branch
+# discover_roxabi_marketplaces - find all marketplaces with staging branch
 discover_roxabi_marketplaces() {
     local marketplaces=()
     for dir in "$MARKETPLACES_DIR"/*/; do
@@ -63,7 +68,7 @@ discover_roxabi_marketplaces() {
 ROXABI_MARKETPLACES=$(discover_roxabi_marketplaces)
 step "Discovered Roxabi marketplaces: ${ROXABI_MARKETPLACES}"
 
-# sync_cache MARKETPLACE — rsync plugins/skills into all cache dirs for a marketplace
+# sync_cache MARKETPLACE - rsync plugins/skills into all cache dirs for a marketplace
 # Handles two structures:
 #   1. plugins/<plugin-name>/ (roxabi-marketplace, lyra-marketplace, roxabi-forge)
 #   2. skills/ at root (roxabi-vault-marketplace, voicecli-marketplace)
@@ -73,7 +78,7 @@ sync_cache() {
     local cache="$CACHE_BASE/$marketplace"
     local count=0
 
-    [[ -d "$cache" ]] || { warn "Cache $cache does not exist — skipping"; return; }
+    [[ -d "$cache" ]] || { warn "Cache $cache does not exist - skipping"; return; }
 
     # Structure 1: plugins/<plugin-name>/
     if [[ -d "$repo/plugins" ]]; then
@@ -85,7 +90,7 @@ sync_cache() {
             for hash_dir in "$cache/$plugin"/*/; do
                 local name
                 name=$(basename "$hash_dir")
-                # Skip non-cache dirs — only sync into semver (0.1.0) or hex-hash
+                # Skip non-cache dirs - only sync into semver (0.1.0) or hex-hash
                 [[ "$name" == ".claude-plugin" ]] && continue
                 [[ ! "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && ! "$name" =~ ^[0-9a-f]{12}$ ]] && continue
 
@@ -138,7 +143,7 @@ sync_cache() {
     echo -e "${GREEN}  $count cache dir(s) updated${NC}"
 }
 
-# sync_cache_safe MARKETPLACE — snapshot cache, sync, restore on failure
+# sync_cache_safe MARKETPLACE - snapshot cache, sync, restore on failure
 sync_cache_safe() {
     local marketplace="$1"
     local cache="$CACHE_BASE/$marketplace"
@@ -146,10 +151,10 @@ sync_cache_safe() {
     backup="$(mktemp -d "${TMPDIR:-/tmp}/sync-plugins-backup.XXXXXX")"
 
     _sync_rollback() {
-        warn "Sync failed — rolling back cache from $backup"
+        warn "Sync failed - rolling back cache from $backup"
         rsync -a --delete "$backup/" "$cache/"
         rm -rf "$backup"
-        warn "Rollback complete — cache restored to pre-sync state"
+        warn "Rollback complete - cache restored to pre-sync state"
         exit 1
     }
 
@@ -157,7 +162,7 @@ sync_cache_safe() {
     if [ -d "$cache" ]; then
         rsync -a "$cache/" "$backup/"
     else
-        warn "Cache dir $cache does not exist — nothing to snapshot"
+        warn "Cache dir $cache does not exist - nothing to snapshot"
     fi
 
     trap _sync_rollback ERR INT
@@ -167,7 +172,7 @@ sync_cache_safe() {
     echo -e "${GREEN}  rollback snapshot discarded (sync succeeded)${NC}"
 }
 
-# Step 2-3: Local sync — iterate over all Roxabi marketplaces
+# Step 2-3: Local sync - iterate over all Roxabi marketplaces
 if [[ "$DO_LOCAL" == true ]]; then
     for marketplace in $ROXABI_MARKETPLACES; do
         local_repo="$MARKETPLACES_DIR/$marketplace"
@@ -183,19 +188,24 @@ if [[ "$DO_LOCAL" == true ]]; then
     echo -e "${GREEN}✓ All local caches updated${NC}"
 fi
 
-# Step 4-5: Remote sync (Machine 1)
+# Step 4-5: Remote sync (opt-in) - requires PLUGIN_SYNC_REMOTE_HOST
+if [[ "$DO_REMOTE" == true && -z "$REMOTE_HOST" ]]; then
+    warn "Remote sync requested but PLUGIN_SYNC_REMOTE_HOST is not set - skipping remote sync"
+    DO_REMOTE=false
+fi
+
 if [[ "$DO_REMOTE" == true ]]; then
     for marketplace in $ROXABI_MARKETPLACES; do
         # Skip if marketplace doesn't exist on remote
         if ! ssh "$REMOTE_HOST" "[ -d '$MARKETPLACES_DIR/$marketplace' ]" 2>/dev/null; then
-            warn "Marketplace $marketplace not found on M1 — skipping"
+            warn "Marketplace $marketplace not found on $REMOTE_HOST - skipping"
             continue
         fi
 
-        step "Pulling staging on Machine 1 for $marketplace..."
+        step "Pulling staging on $REMOTE_HOST for $marketplace..."
         ssh "$REMOTE_HOST" "cd '$MARKETPLACES_DIR/$marketplace' && git fetch origin && git merge --ff-only origin/staging"
 
-        step "Syncing $marketplace → Machine 1 cache..."
+        step "Syncing $marketplace → $REMOTE_HOST cache..."
         ssh "$REMOTE_HOST" "
             set -euo pipefail
             marketplace='$marketplace'
@@ -240,7 +250,7 @@ if [[ "$DO_REMOTE" == true ]]; then
             echo \"\$count cache dir(s) updated\"
         "
     done
-    echo -e "${GREEN}✓ All Machine 1 caches updated${NC}"
+    echo -e "${GREEN}✓ All remote caches updated${NC}"
 fi
 
 echo -e "${GREEN}✓ All done${NC}"
