@@ -2,7 +2,7 @@
 name: validate
 argument-hint: [--quick | --full | --affected]
 description: Run all quality gates (lint, typecheck, test, env, i18n, license) and produce a structured pass/fail report. Triggers: "validate" | "check everything" | "quality check" | "pre-push check" | "are we green".
-version: 0.2.0
+version: 0.3.0
 allowed-tools: Bash, Read
 ---
 
@@ -28,6 +28,7 @@ Run all χ sequentially → single structured pass/fail report. ¬stop on first 
 | 3 | report | ✓ | report printed | — |
 | 4 | failure-details | — | error lines shown | ∃ failures |
 | 5 | verdict | ✓ | pass/fail declared | — |
+| 6 | dogfood | — | checklist printed | non-blocking, spec matrix ∃ |
 
 ## Pre-flight
 
@@ -110,6 +111,22 @@ Test:
 - ∀ χ pass → `All checks passed. Safe to push.`
 - ∃ χ fail → `{N} check(s) failed. Fix before pushing.`
 - `--quick` ∧ ∀ pass → `Quick checks passed. Run /validate for full check.`
+
+### 6. Dogfood manuel (non-bloquant, lecture seule)
+
+Les χ automatisés ne voient pas la correctness sémantique qu'un humain seul juge (wording d'email, montant affiché, bon template par sous-type). Cette étape **imprime** une checklist d'acceptation manuelle ; elle **ne gate jamais** le verdict (qui reste basé sur les χ auto).
+
+1. `N ← git branch --show-current | grep -oE '[0-9]+' | head -1`
+2. `spec ← ls artifacts/specs/${N}-*.md 2>/dev/null | head -1`
+3. spec ∃ ∧ contient `## Matrice des effets observables` → extraire chaque cellule non-`N/A` → imprimer en `- [ ]` :
+   ```
+   Dogfood (manuel, non-bloquant) — à vérifier dans l'app avant merge :
+     - [ ] {transition} × {sous-type} → {effet observable attendu}
+     ...
+   ```
+4. spec ∄ ∨ ¬matrice → imprimer une seule ligne : `Dogfood : pas de matrice dans le spec, vérifier les chemins à variantes à la main.`
+
+¬modifier de fichier. ¬échouer si le spec est absent.
 
 ## Edge Cases
 

@@ -2,7 +2,7 @@
 name: spec
 argument-hint: '[--issue <N> | --analysis <path> | --frame <path> | --audit]'
 description: Solution spec — acceptance criteria, breadboard, slices. Triggers: "write spec" | "spec this" | "solution design" | "what will we build" | "design the solution" | "acceptance criteria" | "define acceptance criteria" | "spec it out" | "write the spec".
-version: 0.2.0
+version: 0.3.0
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, Skill, ToolSearch
 ---
 
@@ -130,6 +130,7 @@ Write σ. Must include:
 | `## Users` — who is affected | — |
 | `## Expected Behavior` — narrative walkthrough | — |
 | `## Data Model & Consumers` — mermaid diagrams (see below) | Tier S |
+| `## Matrice des effets observables` (contrats de couture, see below) | ¬variance sous-type × cycle-de-vie |
 | `## Breadboard` — affordance tables + wiring | Tier S |
 | `## Slices` — vertical increments table | Tier S |
 | `## Success Criteria` — `- [ ]` checkboxes, each binary | — |
@@ -142,6 +143,23 @@ Write σ. Must include:
 3. **Consumer summary table** — consumer → fields consumed, when, status (this issue / future).
 
 Diagrams go BEFORE Breadboard. They answer "what is the data shape and who uses it" while Breadboard answers "how do pieces wire together."
+
+### Matrice des effets observables (contrats de couture)
+
+Obligatoire dès que la feature touche une **entité à sous-types** (ex. booking : discovery-call / mentoring-payé / session-proposée) traversant **plusieurs transitions de cycle de vie** (create / reschedule / cancel / no-show / expire). Skip uniquement si aucune variance sous-type × transition n'existe.
+
+Table : lignes = transitions, colonnes = sous-types. Chaque case déclare l'**effet observable** attendu : event publié, template/email routé, side-effect (slot matérialisé, DiscoveryCall créé), invariant data. Une case sans effet distinct porte `N/A` **explicite** (jamais vide).
+
+```
+| Transition  | Discovery-call        | Mentoring payé        | Session proposée          |
+|-------------|-----------------------|-----------------------|---------------------------|
+| create      | event X, template T1  | event X, template T2  | event X (+coachingSessionId), template T3 |
+| reschedule  | template T1r          | template T2r          | template T3r (+confirmUrl) |
+| cancel      | template T1c          | template T2c + refund | template T3c              |
+| no-show     | ...                   | ...                   | ... ou N/A explicite      |
+```
+
+Pourquoi : la majorité des bugs « découverts au test manuel » sont des **cases vides** de cette matrice (un comportement câblé sur une transition, oublié sur sa sœur ; un sous-type qui retombe sur le template d'un autre). Rendre la grille explicite au stade spec rend la case manquante visible avant le code. Le pre-check (Step 3) refuse une case vide. Le parity-grep de `/code-review` vérifie l'implémentation contre cette grille.
 
 May contain χ (max 3–5). χ items block `/plan` — must be resolved first.
 
@@ -156,6 +174,7 @@ May contain χ (max 3–5). χ items block `/plan` — must be resolved first.
 | Ambiguity budget | ≤5 χ items | — |
 | Slice coverage | Every affordance appears in ≥1 slice | ¬Breadboard ∨ ¬Slices |
 | Edge completeness | Each edge case has handling strategy | — |
+| Seam matrix completeness | Chaque case (sous-type × transition) remplie ou `N/A` explicite | ¬Matrice (entité sans variance) |
 
 ≥2 failures → inform user:
 ```

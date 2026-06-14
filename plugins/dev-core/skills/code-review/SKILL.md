@@ -2,7 +2,7 @@
 name: code-review
 argument-hint: [#PR]
 description: Multi-domain code review (agents + Conventional Comments → findings + verdict). Triggers: "code review" | "review changes" | "review PR #42" | "check my code" | "review my changes" | "review this PR" | "do a code review" | "review the diff" | "look at my code".
-version: 0.2.0
+version: 0.3.0
 allowed-tools: Bash, Read, Write, Glob, Grep, Task, Skill, ToolSearch
 ---
 
@@ -35,6 +35,7 @@ Let:
 | 1 | gather-changes | ✓ | Δ listed | — |
 | 1.5 | secret-scan | ✓ | ∅ matches (or ACK) | — |
 | 2 | spec-compliance | — | criteria checked | spec ∃ |
+| 2.5 | seam-parity | — | siblings grepped | discriminant/event/contract ∈ Δ |
 | 3 | multi-domain-review | ✓ | agents return | parallel |
 | 4 | merge-and-present | ✓ | F + verdict | — |
 | 6 | post-to-pr | — | comment posted | PR ∃ |
@@ -76,6 +77,23 @@ git diff ${BASE}...HEAD | grep -iE '(password|passwd|secret|api[_-]?key|auth[_-]
 2. spec ← `ls artifacts/specs/<issue_num>-*.md 2>/dev/null`
 3. spec ∃ → ∀ criterion: met → ∅ | ¬met → `issue(blocking):` | ∀ met → `praise:`
 4. spec ∄ → skip
+
+## Phase 2.5 — Seam Parity (parity-grep)
+
+Objectif : intercepter le bug le plus fréquent du projet, un comportement/contrat câblé sur **un** chemin et non propagé à ses **frères**. Couvre 4 coutures : routing par sous-type, champs d'event de domaine, contrat front payload ↔ schéma Zod, params listener ↔ template email.
+
+**Déclencheurs (∃ l'un → run, sinon skip) :**
+- spec ∃ avec section `## Matrice des effets observables`, OU
+- Δ ajoute/modifie un branchement sur un discriminant (`offerSlug`, `coachingSessionId`, `meetingType`, sous-type produit, `status`), OU
+- Δ ajoute un champ à un event de domaine (`*.event.ts`), un schéma Zod de requête, ou un objet `params` envoyé à un template email.
+
+**Procédure :**
+1. ∀ comportement B ajouté sur un chemin P dans Δ : identifier les chemins frères (sibling use-cases create/reschedule/cancel/no-show, sibling `*.event.ts`, sibling listeners, les 2 côtés d'un contrat front/Zod ou listener/template).
+2. `grep` le discriminant / la clé / le champ sur chaque frère.
+3. Frère sans B → `issue(blocking): seam parity — {B} présent sur {P}, absent sur {sibling}`. Class: `parallel-path-drift`. Raw callsites: tous les frères concernés.
+4. spec ∃ avec matrice → confronter l'implémentation à chaque case ; case promise dans la matrice mais absente du code → `issue(blocking):`. Case `N/A` → ignorer.
+
+Findings ajoutés au pool Phase 4. ¬gate ici (le verdict Phase 4 tranche). spec ∄ ∧ ¬discriminant ∧ ¬event/contrat touché → skip silencieux.
 
 ## Phase 3 — Multi-Domain Review (Fresh Agents)
 
