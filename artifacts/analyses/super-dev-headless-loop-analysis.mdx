@@ -1,0 +1,112 @@
+---
+title: "Brainstorm: /super-dev Headless Loop"
+description: Nouveau skill /super-dev parallèle à /dev, basé sur le pattern Orchestrator-to-Claude-Headless du PRD, pour exécuter des sessions longues sans context rot.
+type: brainstorm
+---
+
+## Trigger
+
+Deux signaux convergent :
+
+1. **PRD `docs/idees-prd.md`** : propose un pattern *Orchestrator-to-Claude-Headless* pour éliminer le "context rot" qui dégrade les sessions autonomes longues (typiquement `/goal`). L'orchestrateur reste léger, délègue à des instances éphémères `claude -p`, et boucle jusqu'à condition de succès.
+2. **`/dev` actuel** ([plugins/dev-core/skills/dev/SKILL.md](plugins/dev-core/skills/dev/SKILL.md)) : excellent pour piloter le cycle frame, spec, plan, implement, PR sur **un** issue avec un humain présent, mais pas conçu pour boucler 50 itérations en autonomie ni pour orchestrer une **file** d'issues.
+
+Objectif du brainstorm : explorer comment ajouter un `/super-dev` parallèle à `/dev`, sans toucher au flux supervisé existant, en intégrant deux idées du PRD (boucle de condition, GStack multi-agent voting) et quatre garde-fous critiques (plafonds itérations/coût, détection de boucle, rollback git).
+
+## Contexte
+
+Décisions cadre (validées en interview) :
+
+| Dimension | Choix |
+|-----------|-------|
+| Rapport à `/dev` | Skill **parallèle**, pas un remplacement |
+| État | **Labels GitHub** (`status:queue`, `status:testing`, `status:bug`, `status:done`), pas Projects V2 |
+| Autonomie | Headless pour exécution, **gates humains Pattern A** aux décisions clés |
+| Capacités explorées | Boucle de condition, GStack voting |
+| Hors-scope brainstorm | Super QA Playwright BFS, Super Build TDD strict (à brainstormer séparément) |
+| Garde-fous obligatoires | Cap itérations, cap coût/temps, détection de boucle, snapshot git |
+| Livrable cible | Pré-recommandation : 1 direction + 2-3 alternatives, prêt à promouvoir en `/analyze` |
+
+## Ideas
+
+### Idée 1 (recommandée) : Orchestrateur mince + `/dev` réutilisé en headless
+
+- **Description** : `/super-dev` lit la file `status:queue`, pour chaque issue lance un sous-processus `claude -p "/dev #N --autonomous"` qui exécute tout le cycle. L'orchestrateur ne lit que le rapport final (PR ouverte ? labels mis à jour ?), met à jour le label GitHub, passe au suivant. Boucle jusqu'à `gh issue list -l status:queue` vide ou cap atteint.
+- **Upside** :
+  - **Pas de duplication** : on capitalise sur `/dev`, ses step skills, ses gates, ses artifacts. `/super-dev` ne réinvente que la boucle externe.
+  - **Context rot éliminé par construction** : chaque issue = un sous-processus claude frais, contexte propre. L'orchestrateur reste à ~5k tokens (juste le scoreboard).
+  - **Migration douce** : un humain peut interrompre, reprendre en mode supervisé via `/dev #N`, l'état GitHub est la source de vérité partagée.
+- **Downside** :
+  - **Décisions Pattern A invisibles** : si `/dev` headless rencontre une décision (Pattern A : "Create issue / Proceed without"), comment gérer ? Soit timeout puis label `status:needs-human`, soit pré-policy ("toujours créer l'issue").
+  - **Coût** : N sous-processus = N fois le coût d'init, prompt cache jamais partagé entre issues.
+  - **Debugging difficile** : un sous-processus qui se plante laisse peu de traces sans bonne capture stdout/stderr.
+
+### Idée 2 : Orchestrateur "fat" autonome
+
+- **Description** : `/super-dev` réimplémente sa propre boucle d'exécution (delegate vers `/analyze`, `/implement`, `/pr`, `/ci-watch`) sans passer par `/dev`. Reste dans une **seule** session Claude (pas de sous-processus), gère la file en mémoire + labels GitHub.
+- **Upside** :
+  - **Plus simple à debug** : tout dans une seule session, logs continus.
+  - **Prompt cache réutilisé** : grosses économies sur les itérations similaires.
+  - **Décisions Pattern A naturelles** : l'orchestrateur peut négocier les gates.
+- **Downside** :
+  - **Context rot garanti** : c'est exactement le problème que le PRD veut résoudre. Au bout de 10-15 itérations, hallucinations probables sur "ai-je vraiment fini ?".
+  - **Duplication** : duplique la logique de `/dev` (state detection, step routing).
+  - **Crash = perte totale** : pas de checkpoint propre entre issues.
+
+### Idée 3 : GitHub Actions comme runner headless
+
+- **Description** : `/super-dev` ne lance pas `claude -p` localement, il pousse un workflow GitHub Actions (`.github/workflows/autonomous-dev.yml`) qui exécute Claude en CI sur chaque issue de la queue. État 100% sur GitHub (issues + labels + workflow runs). L'orchestrateur local devient un dashboard de supervision.
+- **Upside** :
+  - **Persistance native** : tout survit aux redémarrages locaux, l'état est sur GH.
+  - **Parallélisation** : N issues peuvent tourner en parallèle (matrix strategy).
+  - **Audit trail** : chaque run = un log GH consultable, perfect pour le retro.
+- **Downside** :
+  - **Setup lourd** : secrets Anthropic, billing CI, sécurité (workflow exécute du code arbitraire).
+  - **Gates humains compliqués** : Pattern A devient un commentaire GitHub à parser, latence haute.
+  - **Coût CI minutes** : peut exploser sur sessions longues. Hors budget probable pour un side-project.
+
+### Idée 4 : Hybride avec GStack voting comme tie-breaker
+
+- **Description** : Combo Idée 1 + GStack voting. Quand `/dev` headless aurait remonté une question Pattern A (timeout `status:needs-human`), au lieu d'attendre l'humain, `/super-dev` invoque automatiquement un vote multi-rôle (CEO, EM, Designer, QA) via sous-processus dédiés. Si vote unanime ou super-majorité, décision prise. Sinon escalade.
+- **Upside** :
+  - **Réduit l'attente humaine** sans la supprimer.
+  - **Diversité de perspectives** : limite les biais d'un seul agent.
+  - **Compatible avec Idée 1** : c'est une couche au-dessus.
+- **Downside** :
+  - **Coût × 4** sur les décisions (4 votes Claude par décision).
+  - **Risque de groupthink** : 4 instances Claude votent souvent pareil. Le PRD le sait, c'est pour ça qu'il propose des rôles distincts, mais l'efficacité réelle est à mesurer.
+  - **Complexité** : 4 prompts système à maintenir, format de vote, agrégation.
+
+## Garde-fous transverses (s'appliquent aux 4 idées)
+
+| Garde-fou | Implémentation envisagée |
+|-----------|--------------------------|
+| Cap itérations | Compteur dans `.super-orchestrator/state.json`, stop à N=20 par défaut, configurable |
+| Cap coût/temps | Wall-clock max + parsing du token usage retourné par `claude -p`, stop si seuil dépassé |
+| Détection de boucle | Hash du diff produit + hash des bugs reportés. Si même hash 2 itérations consécutives sur la même issue, escalade label `status:loop-detected` |
+| Snapshot/rollback | Tag git `super-orch/iter-{N}` avant chaque itération, ability à `git reset --hard tag` (avec confirmation humaine) |
+
+## What's next ?
+
+**Direction recommandée : Idée 1 (orchestrateur mince + `/dev` headless)**, avec ces priorités d'investigation :
+
+1. **Spike technique (risque #1)** : valider que `claude -p "/dev #N --autonomous" --dangerously-skip-permissions` fonctionne de bout en bout en sous-processus. Mesurer :
+   - Le code retour et la disponibilité du transcript pour parsing par l'orchestrateur.
+   - Le comportement face aux gates Pattern A (timeout ? blocage ?).
+   - L'overhead d'init (combien de tokens "perdus" par sous-processus).
+2. **Décision policy Pattern A** : déterminer la stratégie par défaut quand un gate est rencontré en mode headless. Options : `auto-create-issue`, `auto-conservative`, `escalate-via-label`. Pas besoin de trancher au brainstorm, mais doit apparaître dans `/analyze`.
+3. **Schéma de labels** : formaliser le contrat entre `/super-dev` et `/dev` (qui pose `status:queue`, qui le retire, qui pose `status:bug`). Probablement un fichier `plugins/dev-core/skills/super-dev/labels.md`.
+4. **Décider GStack maintenant ou plus tard** : Idée 4 est attrayante mais ajoute complexité. Recommandation : phase 2, après que Idée 1 fonctionne en supervision humaine pour les gates.
+
+**Alternatives à garder en réserve** :
+
+- **Idée 2** : seulement si le spike de l'Idée 1 montre que `claude -p` en sous-processus est trop fragile (debugging impossible, code retour pas fiable).
+- **Idée 3** : à considérer si le projet bascule en mode "production CI" avec plusieurs contributeurs. Pour l'instant, surdimensionné.
+- **Idée 4** : roadmap phase 2, après validation du noyau.
+
+**Prochaines étapes concrètes** :
+
+- [ ] Lancer un spike sur `claude -p` (idée 1, point 1 ci-dessus). 1 jour max, livrable : un script bash + un mini-rapport.
+- [ ] Si spike OK, créer issue GitHub "feat: super-orchestrator skill" et `/req` pour ajouter le REQ.
+- [ ] Promouvoir ce brainstorm en analyse : `/interview --promote artifacts/analyses/super-dev-headless-loop-analysis.mdx` une fois le spike rendu.
+- [ ] Brainstorm séparé sur Super QA Playwright et Super Build TDD (explicitement hors-scope ici, mais à faire avant de tagger le skill comme `1.0`).

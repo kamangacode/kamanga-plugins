@@ -1,0 +1,122 @@
+---
+title: "Étude du Risque #1 : Faisabilité de `/dev` headless"
+description: Investigation pré-spike sur la viabilité de `claude -p "/dev #N --autonomous"` en sous-processus, recensement des gates bloquants et options pour les contourner.
+---
+
+## Source
+
+Brainstorm parent : [super-dev-headless-loop-analysis.mdx](super-dev-headless-loop-analysis.mdx). Risque #1 défini comme : "valider que `claude -p '/dev #N --autonomous' --dangerously-skip-permissions` fonctionne de bout en bout en sous-processus. Mesurer code retour + transcript, comportement face aux gates Pattern A, overhead d'init."
+
+## Problème
+
+Avant de brûler des tokens sur un spike, on a besoin de savoir si la chaîne `/dev` actuelle peut **physiquement** tourner en mode `-p` sans intervention humaine. La réponse conditionne tout le design de `/super-dev`.
+
+## Findings
+
+### 1. Capacités CLI (lecture de `claude --help`)
+
+Plusieurs flags réduisent l'incertitude **avant même** de lancer quoi que ce soit :
+
+| Flag | Usage pour `/super-dev` |
+|------|-------------------------|
+| `--output-format json` | Parsing trivial du résultat final par l'orchestrateur (1 result object) |
+| `--output-format stream-json` | Observabilité en direct, plus `--include-hook-events` pour audit complet |
+| `--max-budget-usd <N>` | **Cap coût natif** : un des 4 garde-fous est déjà gratuit, juste à le passer |
+| `--bare` | Skip hooks, auto-memory, CLAUDE.md auto-discovery → exécution déterministe |
+| `--exclude-dynamic-system-prompt-sections` | Meilleur cache hit cross-runs (réduit overhead init) |
+| `--no-session-persistence` | Nettoyage automatique, pas de pollution `~/.claude/projects/` |
+| `--session-id <uuid>` | Traçabilité, permet de corréler iter N <=> session |
+| `--json-schema <schema>` | Force la sortie finale à respecter un schéma (parfait pour rapport d'itération) |
+| `--input-format stream-json` | Permet d'injecter des réponses sur stdin → possible levier pour répondre aux gates |
+| `--dangerously-skip-permissions` | Autonomie totale sur les permissions tool |
+
+**Conclusion partielle** : la CLI offre déjà tout ce qu'il faut pour le **transport** (lancer, capter sortie, capper le budget). Le vrai problème est ailleurs.
+
+### 2. Recensement des gates dans la chaîne `/dev`
+
+Audit `grep` de tous les SKILL.md du plugin `dev-core`. Voici les gates Pattern A (DP(A)) qu'une session `/dev #N` peut rencontrer :
+
+| Skill | Gates DP(A) | Notes |
+|-------|-------------|-------|
+| `/dev` (entrée) | 9 | Issue existe ?, tier (S/F-lite/F-full), frame approval, recovery on fail, --from skip warnings... |
+| `/frame` | délègue à `/interview` | **Utilise `AskUserQuestion`** (interview skill) : BLOQUANT en `-p` |
+| `/spec` | délègue à `/interview` | Idem |
+| `/plan` | 5+ | Resolve ambiguities, proceed/adjust/abort, slice selection DP(C), final plan approval |
+| `/implement` | 6 | Issue check, branch reuse, dirty state, worktree XS exception, fix loop escalation, conflict |
+| `/pr` | 4 | Existing PR update, lint fails, rebase conflict, edit title/body |
+| `/code-review` | 1 | "Review and proceed / Abort" |
+| `/fix` | 1 **par finding** | Multi-solution choix par review comment |
+| `/cleanup` | DP(C) | Sélection branches à supprimer |
+
+**Total grossier** : 30+ points de blocage dans un cycle complet F-full. Même un cycle F-lite minimal touche ~10 gates.
+
+### 3. Comportement attendu en `-p`
+
+Le protocole `decision-presentation.md` indique : *"Wait for user reply. Execute immediately on receipt — no confirmation loop."* Et : *"Use this protocol whenever a user decision is required. **Never use AskUserQuestion**."*
+
+Donc :
+- Les DP(A/B/C) sont écrits en **texte** (pas un appel d'outil), Claude attend une **prochaine réponse user** qui ne viendra jamais en `-p` (où l'entrée est mono-shot par défaut).
+- En mode `-p` simple, Claude finit son tour après avoir émis le texte de décision. La session **se termine** sans avoir avancé le travail.
+- En mode `--input-format stream-json`, il faut un parseur ad-hoc qui détecte le bloc `── Decision: ──`, choisit une option selon une policy, et envoie la réponse sur stdin.
+
+**Edge case grave** : `/frame` et `/spec` utilisent `/interview` qui appelle `AskUserQuestion` (un tool, pas du texte). En `-p`, cet appel d'outil peut :
+- **Soit échouer** (tool indisponible en non-interactif),
+- **Soit hanger** (attente d'une réponse jamais fournie),
+- **Soit produire un fallback texte** non documenté.
+
+À tester impérativement.
+
+## Implications
+
+Le pattern *Orchestrator-to-Claude-Headless du PRD* n'est **pas plug-and-play** sur `/dev` en l'état. Il y a deux types de blocages :
+
+1. **Blocages "texte" (DP)** : nombreux mais traitables via un middleware stdin/stdout qui implémente une auto-decision policy.
+2. **Blocages "tool" (AskUserQuestion via /interview)** : potentiellement insolubles sans modification de `/interview` ou du harness. C'est le **vrai** risque #1, plus dur que prévu.
+
+## Options stratégiques
+
+### Option A : Stripped pipeline (recommandée pour MVP)
+
+`/super-dev` ne réutilise **pas** `/dev` mais une chaîne plus courte qui évite les skills à interview :
+
+```
+/super-dev #N → /implement #N → /pr → /ci-watch
+```
+
+Bypass total de `/frame`, `/spec`, `/plan`, `/interview`. Pré-requis : l'issue GitHub doit déjà contenir la spec dans son body (la file `status:queue` ne contient que des issues "spec-ready").
+
+- **Upside** : techniquement réalisable cette semaine, pas de touch-up de `/dev` ou `/interview`.
+- **Downside** : ne couvre que les itérations type "bug fix" ou "feature scope:clear". Les nouveaux features avec ambiguïté restent supervisés via `/dev`.
+- **Spike réduit** : tester `claude -p /implement #N` sur 1-2 issues triviales. ~1h.
+
+### Option B : Middleware DP-responder
+
+Garder `/dev` complet mais ajouter une couche stdin/stdout :
+- Parse stream-json en sortie, détecte les blocs DP(A/B/C).
+- Auto-répond selon policy (1ère option = "safe default", ou heuristique custom).
+- Injecte la réponse sur stdin.
+
+- **Upside** : conserve toute la valeur de `/dev` (gates, reviews, validation).
+- **Downside** : parser fragile (format DP peut changer), policy difficile à calibrer (quelle option choisir face à "Reuse branch / Recreate / Abort" ?), ne règle pas `/interview`.
+- **Spike** : 1-2 jours pour POC du parser + policy.
+
+### Option C : Patcher `/dev` et `/interview` pour mode `--autonomous`
+
+Modifier les skills eux-mêmes pour qu'ils :
+- Acceptent un flag `--autonomous` qui transforme chaque DP en décision pré-déterminée.
+- Remplacent `AskUserQuestion` par des valeurs par défaut quand le flag est actif.
+
+- **Upside** : la "vraie" solution propre, alignée avec le PRD.
+- **Downside** : touche 10+ skills, casse l'invariant "skill agnostic de l'orchestrateur", risque de régression sur le mode supervisé.
+- **Spike** : non, c'est un chantier de 1-2 semaines, pas un spike.
+
+## Recommandation
+
+**Démarrer par Option A (stripped pipeline)** : on apprend en production sur le sous-cas le plus simple (issues spec-ready), sans toucher l'écosystème existant. Si ça marche, on étend ensuite vers Option B (parser DP) pour absorber `/plan` et `/code-review`. Option C reste un fallback long-terme.
+
+## Next Steps
+
+- [ ] **Mini-spike Option A** (~1h) : `claude -p --output-format json --max-budget-usd 0.50 --dangerously-skip-permissions "/implement #N"` sur une issue triviale du repo. Mesurer : code retour, JSON parseable, tokens consommés, ratio temps wall-clock vs tokens.
+- [ ] **Mini-spike `/interview` en -p** (~30min) : isoler le cas, voir comment `AskUserQuestion` se comporte en mode non-interactif. C'est le verdict final sur Option C.
+- [ ] **Spec du contrat labels** (en parallèle) : définir qui pose `status:spec-ready`, `status:queue`, `status:in-progress`, `status:bug`, `status:done`, `status:needs-human` pour cadrer l'Option A.
+- [ ] Mettre à jour le brainstorm parent avec ces findings (ou promouvoir vers `/analyze` une fois les 2 spikes faits).

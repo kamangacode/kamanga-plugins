@@ -13,7 +13,8 @@ Replace the hardcoded `BRANCH_PROTECTION_PAYLOAD` constant and inline `secrets` 
 
 ## Architecture
 
-```flowchart TD
+```mermaid
+flowchart TD
   subgraph S1["S1 — scanning.md (doc-writer)"]
     A["scanning.md Phase 1b\n(rewrite: standalone secret-scan.yml YAML)"]
   end
@@ -42,7 +43,8 @@ Replace the hardcoded `BRANCH_PROTECTION_PAYLOAD` constant and inline `secrets` 
   end
 ```
 
-```flowchart LR
+```mermaid
+flowchart LR
   subgraph github-infra.ts
     N1["buildBranchProtectionPayload(opts)"]
     N2["detectSecretScanWorkflow(repo)"]
