@@ -31,13 +31,6 @@
       "source": "./plugins/dev-core",
       "category": "development",
       "version": "0.1.0"
-    },
-    {
-      "name": "kamanga-guide",
-      "description": "Produit des guides editoriaux KAMANGA (lead magnets HTML print A4) a partir d'un brief : charte graphique, bibliotheque de composants, catalogue d'offres et page auteur.",
-      "source": "./plugins/kamanga-guide",
-      "category": "content",
-      "version": "0.1.0"
     }
   ]
 }
